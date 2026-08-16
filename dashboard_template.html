@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Our Budget</title>
+<style>
+  :root {
+    --ink: #1f1e1a;
+    --ink-soft: #5a584f;
+    --ink-muted: #8f8d81;
+    --paper: #faf8f2;
+    --card: #ffffff;
+    --line: #e4e1d5;
+    --green: #1d9e75;
+    --green-bg: #e1f5ee;
+    --amber: #ba7517;
+    --red: #a32d2d;
+    --red-bg: #fcebeb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 2rem 1.25rem 4rem;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 12px;
+    margin-bottom: 24px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .month-label { font-size: 13px; color: var(--ink-muted); }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  .section { margin-bottom: 28px; }
+  .people-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 560px) { .people-grid { grid-template-columns: 1fr; } }
+  .row { margin-bottom: 14px; }
+  .row-top { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .row-amounts { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .track { height: 6px; background: #ece9dd; border-radius: 4px; overflow: hidden; }
+  .bar { height: 100%; border-radius: 4px; }
+  .status-label { font-size: 11px; margin-top: 3px; }
+  .bar.ontrack, .status-label.ontrack { color: var(--green); }
+  .track .bar.ontrack { background: var(--green); }
+  .bar.close, .status-label.close { color: var(--amber); }
+  .track .bar.close { background: var(--amber); }
+  .bar.over, .status-label.over { color: var(--red); }
+  .track .bar.over { background: var(--red); }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 28px; }
+  .metric { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .metric-label { font-size: 12px; color: var(--ink-soft); margin: 0 0 4px; }
+  .metric-value { font-size: 22px; font-weight: 600; margin: 0; font-variant-numeric: tabular-nums; }
+  .metric.positive { background: var(--green-bg); }
+  .metric.positive .metric-value, .metric.positive .metric-label { color: var(--green); }
+  .warning-box { background: var(--red-bg); border: 1px solid #f0c9c9; border-radius: 10px; padding: 12px 16px; margin-top: 20px; font-size: 13px; color: var(--red); }
+  .warning-box p { margin: 0 0 6px; font-weight: 600; }
+  .generated-note { font-size: 12px; color: var(--ink-muted); margin-top: 32px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Our budget</h1>
+    <span class="month-label" id="month-label"></span>
+  </header>
+  <div id="app"></div>
+  <p class="generated-note" id="generated-note"></p>
+</div>
+
+<script>
+// Data is baked in at generation time by build_dashboard.py — no fetch, no server.
+const DATA = __DASHBOARD_DATA__;
+
+function fmt(n) {
+  const v = Math.round(Number(n) || 0);
+  return (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString();
+}
+
+function statusLabel(status) {
+  return status === "over" ? "Over budget" : status === "close" ? "Close to limit" : "On track";
+}
+
+function renderRow(item) {
+  const pct = item.budget > 0 ? Math.min(item.actual / item.budget, 1) * 100 : 0;
+  return `
+    <div class="row">
+      <div class="row-top">
+        <span>${item.category}</span>
+        <span class="row-amounts">${fmt(item.actual)} / ${fmt(item.budget)}</span>
+      </div>
+      <div class="track"><div class="bar ${item.status}" style="width:${pct}%"></div></div>
+      <p class="status-label ${item.status}">${statusLabel(item.status)}</p>
+    </div>`;
+}
+
+function render(data) {
+  document.getElementById("month-label").textContent = data.month;
+
+  const peopleHtml = Object.keys(data.people).map(name => {
+    const p = data.people[name];
+    return `<div><h2>${name}</h2>${p.categories.map(renderRow).join("")}</div>`;
+  }).join("");
+
+  const warningHtml = (data.unmatched && data.unmatched.length > 0) ? `
+    <div class="warning-box">
+      <p>⚠ Unmatched person values</p>
+      ${data.unmatched.map(u => `<div>"${u.name}" — ${fmt(u.amount)}</div>`).join("")}
+    </div>` : "";
+
+  document.getElementById("app").innerHTML = `
+    <div class="section">
+      <h2>Household — combined, no split</h2>
+      ${data.household.map(renderRow).join("")}
+    </div>
+    <div class="section people-grid">${peopleHtml}</div>
+    <div class="metrics">
+      <div class="metric">
+        <p class="metric-label">Combined income</p>
+        <p class="metric-value">${fmt(data.combined.income)}</p>
+      </div>
+      <div class="metric">
+        <p class="metric-label">Combined expenses</p>
+        <p class="metric-value">${fmt(data.combined.expenses)}</p>
+      </div>
+      <div class="metric positive">
+        <p class="metric-label">Net this month</p>
+        <p class="metric-value">${data.combined.net >= 0 ? "+" : ""}${fmt(data.combined.net)}</p>
+      </div>
+    </div>
+    ${warningHtml}
+  `;
+}
+
+render(DATA);
+document.getElementById("generated-note").textContent =
+  "Generated locally by build_dashboard.py — re-run it any time after a new import.";
+</script>
+</body>
+</html>

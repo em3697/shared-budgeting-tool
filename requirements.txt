@@ -1,0 +1,4 @@
+gspread>=6.0.0
+google-auth>=2.25.0
+pandas>=2.1.0
+python-dateutil>=2.8.2
