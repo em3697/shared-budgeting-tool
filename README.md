@@ -73,11 +73,15 @@ Both you and Matt need a copy of the *same* `service_account.json` file
 get logged) — you don't each need your own service account, just your own
 copy of this one key file sitting in your own copy of this folder.
 
-## 2. One-time per person: install Python dependencies
+## 2. One-time per person: set up the environment
 
 ```bash
-pip install -r requirements.txt
+chmod +x run_budget.sh
+./run_budget.sh setup
 ```
+
+This creates a `.venv` folder and installs everything from `requirements.txt`
+into it — no need to manage the virtual environment by hand afterward.
 
 ## 3. One-time: fill in config.py
 
@@ -92,23 +96,30 @@ commit and push it — that way Matt gets the correct values automatically via
 ## 4. Weekly workflow (either of you, independently)
 
 ```bash
-python import_sofi.py --person Elise --file ~/Downloads/sofi_export.csv
+./run_budget.sh import Elise
 ```
-(swap `Elise` for `Matt` and point `--file` at their own export)
+(swap `Elise` for `Matt`)
 
-This categorizes, dedupes against what's already in the Sheet, and appends
-only new rows — same behavior as the old Apps Script version, just running
-locally.
+This activates the venv, **auto-detects the SoFi export in `~/Downloads`**
+— no renaming needed, it looks for whatever file matches SoFi's own download
+naming pattern (`..._SoFi-Relay-All-Transactions_....csv`) and picks the most
+recently downloaded one — categorizes, dedupes against what's already in the
+Sheet, appends only new rows, then rebuilds the dashboard automatically.
 
-Then, whenever you want to see current numbers:
-
+If you ever want to point at a specific file instead of auto-detecting (e.g.
+an older export, or a file saved somewhere other than Downloads):
 ```bash
-python build_dashboard.py
+python import_sofi.py --person Elise --file /path/to/export.csv
 ```
 
-This reads the Sheet fresh, computes the month's budget-vs-actual, and opens
-a `dashboard.html` in your browser with the numbers baked in — no server,
-no port, no CORS. Re-run it any time; it overwrites the file with fresh data.
+If you just want to refresh the dashboard without importing anything new:
+```bash
+./run_budget.sh build
+```
+
+Either command opens a `dashboard.html` in your browser with the numbers
+baked in — no server, no port, no CORS. Re-run any time; it overwrites the
+file with fresh data.
 
 ## Why this fixes the bugs from the Apps Script version
 
@@ -125,6 +136,7 @@ no port, no CORS. Re-run it any time; it overwrites the file with fresh data.
 
 | File | Purpose |
 |---|---|
+| `run_budget.sh` | Wrapper: activates the venv, runs setup/import/build |
 | `config.py` | Your Sheet ID, names, tab names — edit this first |
 | `sheets_client.py` | Auth + read/write helpers |
 | `categorize.py` | Keyword matching, budget lookups, person-name normalization |

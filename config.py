@@ -4,7 +4,7 @@ Shared configuration. Edit the two values below before running anything.
 
 # The Sheet's ID — the long string in its URL:
 # https://docs.google.com/spreadsheets/d/THIS_PART/edit
-SPREADSHEET_ID = "PASTE_YOUR_SPREADSHEET_ID_HERE"
+SPREADSHEET_ID = "1rhxvEqScx2U3c7z_sEkiNBAuAgsz3UiHo5eaGMwxo3M"
 
 # Must match the Owner column in your Categories tab exactly.
 PEOPLE = ["Elise", "Matt"]

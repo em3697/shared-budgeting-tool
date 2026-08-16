@@ -14,12 +14,28 @@ new rows.
 import argparse
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 
 import config
 import sheets_client
 from categorize import load_categories
+
+# SoFi's downloaded filename looks like:
+#   1786904674519_SoFi-Relay-All-Transactions_2026-08-16.csv
+# (a numeric ID, then this fixed label, then the export date)
+SOFI_FILENAME_PATTERN = "SoFi-Relay-All-Transactions_*.csv"
+
+
+def find_latest_export(downloads_dir: Path) -> Path | None:
+    """Finds the most recently modified SoFi export in the given folder,
+    matching the pattern SoFi uses for its downloaded filename. Returns None
+    if nothing matches."""
+    matches = list(downloads_dir.glob(SOFI_FILENAME_PATTERN))
+    if not matches:
+        return None
+    return max(matches, key=lambda p: p.stat().st_mtime)
 
 
 def get_week_label(date: datetime) -> str:
@@ -39,11 +55,31 @@ def make_dedup_key(date_str: str, description: str, amount: float) -> str:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--person", required=True, choices=config.PEOPLE)
-    parser.add_argument("--file", required=True, help="Path to the SoFi CSV export")
+    parser.add_argument(
+        "--file", default=None,
+        help="Path to the SoFi CSV export. If omitted, auto-detects the most "
+             "recently downloaded matching file in --downloads-dir."
+    )
+    parser.add_argument(
+        "--downloads-dir", default=str(Path.home() / "Downloads"),
+        help="Folder to search when --file is omitted (default: ~/Downloads)"
+    )
     args = parser.parse_args()
 
-    print(f"Reading {args.file} for {args.person}...")
-    df = pd.read_csv(args.file)
+    if args.file:
+        csv_path = Path(args.file)
+    else:
+        downloads_dir = Path(args.downloads_dir)
+        found = find_latest_export(downloads_dir)
+        if found is None:
+            print(f"ERROR: No file matching '{SOFI_FILENAME_PATTERN}' found in {downloads_dir}")
+            print("Either export a fresh SoFi CSV to that folder, or pass --file explicitly.")
+            sys.exit(1)
+        csv_path = found
+        print(f"Auto-detected: {csv_path.name}")
+
+    print(f"Reading {csv_path} for {args.person}...")
+    df = pd.read_csv(csv_path)
 
     expected_cols = {
         "Authorized Date", "Posted Date", "Status", "Account Name",

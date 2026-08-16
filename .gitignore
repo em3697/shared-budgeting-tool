@@ -1,0 +1,14 @@
+# Never commit your credential
+service_account.json
+
+# Generated output — regenerated locally by build_dashboard.py, no need to track
+dashboard.html
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS cruft
+.DS_Store
