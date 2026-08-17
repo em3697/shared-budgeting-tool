@@ -109,12 +109,19 @@ def main():
         if len(row) < 3:
             continue
         try:
-            existing_keys.add(make_dedup_key(row[0], row[1], float(row[2])))
-        except (ValueError, IndexError):
+            # Column A comes back as whatever Sheets displays it as (e.g.
+            # "7/29/2026" for a real date value), so normalize to ISO before
+            # keying — otherwise this never matches the "YYYY-MM-DD" keys
+            # built from the CSV below.
+            row_date_iso = pd.to_datetime(row[0]).strftime("%Y-%m-%d")
+            existing_keys.add(make_dedup_key(row_date_iso, row[1], float(row[2])))
+        except (ValueError, TypeError, IndexError):
             continue
 
     new_rows = []
     skipped_duplicate = 0
+    new_categories = []
+    seen_new_categories = set()
 
     for _, r in df.iterrows():
         posted = str(r.get("Posted Date", "")).strip()
@@ -143,6 +150,10 @@ def main():
         sofi_category = str(r.get("Primary Category", "")).strip()
         category = cfg.match_category(description) or sofi_category or "Uncategorized"
 
+        if category not in cfg.types and category not in seen_new_categories:
+            seen_new_categories.add(category)
+            new_categories.append(category)
+
         new_rows.append([
             date_iso,
             description,
@@ -159,9 +170,22 @@ def main():
         print(f"No new transactions to import ({skipped_duplicate} already existed).")
         return
 
+    start_row = len(tx_rows) + 1  # tx_rows includes the header, rows are 1-indexed
     sheets_client.append_rows(sheet, config.TRANSACTIONS_TAB, new_rows)
+    sheets_client.set_real_dates(sheet, config.TRANSACTIONS_TAB, start_row, [row[0] for row in new_rows])
+
     print(f"Imported {len(new_rows)} new transaction(s) for {args.person} "
           f"({skipped_duplicate} skipped as duplicates).")
+
+    if new_categories:
+        # Blank keyword/budget — this is just a placeholder row so the
+        # category shows up for review instead of silently having no
+        # budget line on the dashboard. Fill in keyword/budget/owner by hand.
+        category_rows = [["", cat, args.person, "", "Expense"] for cat in sorted(new_categories)]
+        sheets_client.append_rows(sheet, config.CATEGORIES_TAB, category_rows)
+        print(f"Added {len(new_categories)} new categor{'y' if len(new_categories) == 1 else 'ies'} "
+              f"to the Categories tab (no budget set yet): {', '.join(sorted(new_categories))}")
+
     print("Run build_dashboard.py to see updated numbers.")
 
 

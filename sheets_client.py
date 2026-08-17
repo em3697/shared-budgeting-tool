@@ -35,6 +35,19 @@ def append_rows(sheet, tab_name: str, rows: list[list]):
     ws.append_rows(rows, value_input_option="RAW")
 
 
+def set_real_dates(sheet, tab_name: str, start_row: int, date_strs: list[str]):
+    """Rewrites the Date column (A) for the given 1-indexed row range using
+    USER_ENTERED, so Sheets parses each "YYYY-MM-DD" string into a real date
+    value instead of leaving it as plain text. Only ever call this on column
+    A — every other column must stay RAW to avoid the auto-date-coercion bug
+    described above (e.g. Month values like "2026-08")."""
+    if not date_strs:
+        return
+    ws = sheet.worksheet(tab_name)
+    end_row = start_row + len(date_strs) - 1
+    ws.update(f"A{start_row}:A{end_row}", [[d] for d in date_strs], value_input_option="USER_ENTERED")
+
+
 def clear_raw_import(sheet, tab_name: str):
     ws = sheet.worksheet(tab_name)
     values = ws.get_all_values()

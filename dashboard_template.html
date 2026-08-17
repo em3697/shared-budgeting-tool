@@ -15,6 +15,7 @@
     --green: #1d9e75;
     --green-bg: #e1f5ee;
     --amber: #ba7517;
+    --amber-bg: #fbeed9;
     --red: #a32d2d;
     --red-bg: #fcebeb;
   }
@@ -53,6 +54,8 @@
   .track .bar.close { background: var(--amber); }
   .bar.over, .status-label.over { color: var(--red); }
   .track .bar.over { background: var(--red); }
+  .status-label.unbudgeted { color: var(--amber); }
+  .track .bar.unbudgeted { width: 100% !important; background: repeating-linear-gradient(45deg, var(--amber), var(--amber) 6px, var(--amber-bg) 6px, var(--amber-bg) 12px); }
   .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 28px; }
   .metric { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
   .metric-label { font-size: 12px; color: var(--ink-soft); margin: 0 0 4px; }
@@ -84,16 +87,18 @@ function fmt(n) {
 }
 
 function statusLabel(status) {
+  if (status === "unbudgeted") return "No budget set — needs review";
   return status === "over" ? "Over budget" : status === "close" ? "Close to limit" : "On track";
 }
 
 function renderRow(item) {
   const pct = item.budget > 0 ? Math.min(item.actual / item.budget, 1) * 100 : 0;
+  const amounts = item.status === "unbudgeted" ? fmt(item.actual) : `${fmt(item.actual)} / ${fmt(item.budget)}`;
   return `
     <div class="row">
       <div class="row-top">
         <span>${item.category}</span>
-        <span class="row-amounts">${fmt(item.actual)} / ${fmt(item.budget)}</span>
+        <span class="row-amounts">${amounts}</span>
       </div>
       <div class="track"><div class="bar ${item.status}" style="width:${pct}%"></div></div>
       <p class="status-label ${item.status}">${statusLabel(item.status)}</p>

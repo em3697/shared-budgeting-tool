@@ -84,6 +84,19 @@ def compute_dashboard_data() -> dict:
                 "category": category, "budget": budget, "actual": actual,
                 "remaining": remaining, "status": status,
             })
+
+        # Categories with real spending but no budget line (new/unrecognized
+        # category, or a known category never budgeted for this owner) would
+        # otherwise just be summed into actuals_map and never looked at
+        # below — show them instead of silently dropping the dollars.
+        for category in sorted(set(actuals_map) - set(categories)):
+            actual = actuals_map[category]
+            section_total += actual
+            items.append({
+                "category": category, "budget": 0.0, "actual": actual,
+                "remaining": -actual, "status": "unbudgeted",
+            })
+
         return items, section_total
 
     household_categories = sorted({
