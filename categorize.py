@@ -1,6 +1,9 @@
 """
-Loads the Categories tab and provides matching/lookup helpers.
-Categories tab columns: Keyword | Category | Owner | Monthly Budget | Type
+Loads category config and provides matching/lookup helpers.
+
+Two tabs feed this:
+  - Category Mappings: Keyword | Category
+  - Categories:         Category | Owner | Monthly Budget | Type
 """
 
 from dataclasses import dataclass, field
@@ -31,15 +34,22 @@ class CategoryConfig:
         return self.types.get(category, "Expense")
 
 
-def load_categories(rows: list[list[str]]) -> CategoryConfig:
+def load_categories(mapping_rows: list[list[str]], budget_rows: list[list[str]]) -> CategoryConfig:
     cfg = CategoryConfig()
-    for row in rows[1:]:  # skip header
-        row = row + [""] * (5 - len(row))  # pad short rows
+
+    for row in mapping_rows[1:]:  # skip header
+        row = row + [""] * (2 - len(row))  # pad short rows
         keyword = row[0].strip().lower()
         category = row[1].strip()
-        owner = row[2].strip() or "Household"
-        budget_raw = row[3].strip()
-        type_ = row[4].strip() or "Expense"
+        if keyword and category:
+            cfg.rules.append((keyword, category))
+
+    for row in budget_rows[1:]:  # skip header
+        row = row + [""] * (4 - len(row))  # pad short rows
+        category = row[0].strip()
+        owner = row[1].strip() or "Household"
+        budget_raw = row[2].strip()
+        type_ = row[3].strip() or "Expense"
 
         if not category:
             continue
@@ -52,8 +62,6 @@ def load_categories(rows: list[list[str]]) -> CategoryConfig:
                 pass
         if owner != "Household":
             cfg.personal_owners.add(owner)
-        if keyword and category:
-            cfg.rules.append((keyword, category))
 
     return cfg
 

@@ -100,8 +100,9 @@ def main():
 
     sheet = sheets_client.get_spreadsheet()
 
-    cat_rows = sheets_client.read_all_rows(sheet, config.CATEGORIES_TAB)
-    cfg = load_categories(cat_rows)
+    mapping_rows = sheets_client.read_all_rows(sheet, config.CATEGORY_MAPPINGS_TAB)
+    budget_rows = sheets_client.read_all_rows(sheet, config.CATEGORIES_TAB)
+    cfg = load_categories(mapping_rows, budget_rows)
 
     tx_rows = sheets_client.read_all_rows(sheet, config.TRANSACTIONS_TAB)
     existing_keys = set()
@@ -178,10 +179,11 @@ def main():
           f"({skipped_duplicate} skipped as duplicates).")
 
     if new_categories:
-        # Blank keyword/budget — this is just a placeholder row so the
-        # category shows up for review instead of silently having no
-        # budget line on the dashboard. Fill in keyword/budget/owner by hand.
-        category_rows = [["", cat, args.person, "", "Expense"] for cat in sorted(new_categories)]
+        # Blank budget — this is just a placeholder row so the category shows
+        # up for review instead of silently having no budget line on the
+        # dashboard. Fill in the budget (and add a keyword rule on the
+        # Category Mappings tab, if useful) by hand.
+        category_rows = [[cat, args.person, "", "Expense"] for cat in sorted(new_categories)]
         sheets_client.append_rows(sheet, config.CATEGORIES_TAB, category_rows)
         print(f"Added {len(new_categories)} new categor{'y' if len(new_categories) == 1 else 'ies'} "
               f"to the Categories tab (no budget set yet): {', '.join(sorted(new_categories))}")

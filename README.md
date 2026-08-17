@@ -121,6 +121,56 @@ Either command opens a `dashboard.html` in your browser with the numbers
 baked in — no server, no port, no CORS. Re-run any time; it overwrites the
 file with fresh data.
 
+## The two category tabs
+
+Category data lives in two tabs, kept separate on purpose:
+
+- **Category Mappings** — `Keyword | Category`. Keyword-matching rules used
+  to auto-categorize a transaction from its description (e.g. `chipotle` →
+  `Restaurants & Bars`).
+- **Categories** — `Category | Owner | Monthly Budget | Type`. One row per
+  category/owner pair: who it belongs to (`Household`, `Elise`, `Matt`), the
+  monthly budget, and its type (`Expense`, `Income`, or `Transfer`).
+
+A category only counts as a **household** category if it has an actual
+budget number set with `Owner` = `Household` — an owner label alone with a
+blank budget isn't enough (it'll show up as "unbudgeted" instead).
+
+If you ever need to add a new category by hand: add its keyword rule(s) to
+Category Mappings, and its budget row(s) to Categories. New categories that
+show up automatically from an import or a dashboard recategorization get a
+placeholder row in Categories with a blank budget — fill that in when you
+see it.
+
+(These used to be combined into one Categories tab with a Keyword column.
+`migrate_category_tabs.py` did the one-time split — you shouldn't need to
+run it again, but it's still here, with a `--apply`-gated dry run, if the
+tabs ever need re-splitting.)
+
+## Reviewing and recategorizing from the dashboard
+
+Click any category row to expand it and see the individual transactions
+behind that number for the month. If one's in the wrong category, use the
+dropdown next to it to change it (or pick "+ New category…" to type one that
+doesn't exist yet).
+
+The dashboard is a static file with no write access to the Sheet — the
+service-account credential that can write never gets embedded in it. So
+changing a category there doesn't touch the Sheet directly: it just queues
+the edit. A "N category changes pending" bar appears at the bottom of the
+page; click **Download changes** to save them as a small JSON file. Then run:
+
+```bash
+./run_budget.sh apply-edits
+```
+
+(or `python apply_category_edits.py`) — this auto-detects the newest
+`category-edits_*.json` in `~/Downloads`, applies each change to the
+Transactions tab (skipping any row whose description/amount no longer
+matches what the dashboard showed, in case the Sheet changed in the
+meantime), adds any brand-new category names to the Categories tab, and
+rebuilds the dashboard.
+
 ## Why this fixes the bugs from the Apps Script version
 
 - **No more silent Date auto-conversion.** Sheets does this coercion at the
@@ -143,4 +193,6 @@ file with fresh data.
 | `import_sofi.py` | Weekly CLI import script |
 | `build_dashboard.py` | Computes numbers, generates `dashboard.html` |
 | `dashboard_template.html` | The page template `build_dashboard.py` fills in |
+| `apply_category_edits.py` | Applies category changes downloaded from the dashboard back to the Sheet |
+| `migrate_category_tabs.py` | One-time: split the old combined Categories tab into Category Mappings + Categories |
 | `service_account.json` | Your credential — **not included**, you generate this in step 1 |

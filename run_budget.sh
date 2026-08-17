@@ -3,6 +3,7 @@
 #   ./run_budget.sh setup              one-time: create the venv, install deps
 #   ./run_budget.sh import <Person>    import latest SoFi export, then rebuild dashboard
 #   ./run_budget.sh build              just rebuild the dashboard (no new import)
+#   ./run_budget.sh apply-edits        apply category changes downloaded from the dashboard, then rebuild
 #
 # Auto-detects the SoFi export from ~/Downloads (matching the filename SoFi
 # generates) — no need to rename or move the file first. Pass --file to
@@ -54,11 +55,21 @@ case "$ACTION" in
     python build_dashboard.py
     ;;
 
+  apply-edits)
+    activate_venv
+    echo "Applying category changes from the dashboard..."
+    python apply_category_edits.py
+    echo ""
+    echo "Rebuilding dashboard..."
+    python build_dashboard.py
+    ;;
+
   *)
     echo "Usage:"
     echo "  ./run_budget.sh setup              one-time: create venv + install deps"
     echo "  ./run_budget.sh import <Person>     import latest SoFi export + rebuild dashboard"
     echo "  ./run_budget.sh build               just rebuild the dashboard"
+    echo "  ./run_budget.sh apply-edits         apply dashboard category changes + rebuild"
     exit 1
     ;;
 esac

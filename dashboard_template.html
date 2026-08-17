@@ -41,6 +41,7 @@
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
   .section { margin-bottom: 28px; }
   .people-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .people-grid > div { min-width: 0; }
   @media (max-width: 560px) { .people-grid { grid-template-columns: 1fr; } }
   .row { margin-bottom: 14px; }
   .row-top { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
@@ -65,6 +66,28 @@
   .warning-box { background: var(--red-bg); border: 1px solid #f0c9c9; border-radius: 10px; padding: 12px 16px; margin-top: 20px; font-size: 13px; color: var(--red); }
   .warning-box p { margin: 0 0 6px; font-weight: 600; }
   .generated-note { font-size: 12px; color: var(--ink-muted); margin-top: 32px; text-align: center; }
+  .row-top.clickable { cursor: pointer; }
+  .row-top.clickable:hover span:first-child { text-decoration: underline; }
+  .expense-list { margin: 8px 0 0; padding-left: 10px; border-left: 2px solid var(--line); }
+  .expense-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 12px; }
+  .expense-info { display: flex; gap: 10px; flex: 1; min-width: 0; color: var(--ink-soft); }
+  .expense-date { flex-shrink: 0; color: var(--ink-muted); }
+  .expense-desc { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .expense-amt { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .expense-cat-select { font-size: 12px; max-width: 150px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); padding: 2px 4px; }
+  .expense-cat-select.edited { border-color: var(--amber); background: var(--amber-bg); }
+  .no-expenses { margin: 4px 0; font-size: 12px; color: var(--ink-muted); }
+  .pending-bar {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 12px;
+    background: var(--ink); color: var(--paper); border-radius: 10px;
+    padding: 10px 14px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+    z-index: 10;
+  }
+  .pending-bar button {
+    font: inherit; font-weight: 600; color: var(--ink); background: var(--paper);
+    border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -75,6 +98,10 @@
   </header>
   <div id="app"></div>
   <p class="generated-note" id="generated-note"></p>
+</div>
+<div class="pending-bar" id="pending-bar" hidden>
+  <span class="pending-count"></span>
+  <button type="button" id="download-edits-btn">Download changes</button>
 </div>
 
 <script>
@@ -91,18 +118,136 @@ function statusLabel(status) {
   return status === "over" ? "Over budget" : status === "close" ? "Close to limit" : "On track";
 }
 
-function renderRow(item) {
+// Category-edit staging: a transaction's new category never gets written to
+// the Sheet from here — this only builds a JSON file for apply_category_edits.py
+// to apply later, so the write credential never has to live in the browser.
+const pendingEdits = {}; // sheet row -> {row, date, description, amount, person, oldCategory, newCategory}
+let rowIdCounter = 0;
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function txForCategory(category, personFilter) {
+  return (DATA.transactions || []).filter(t =>
+    t.category === category && (personFilter === null || t.person === personFilter));
+}
+
+function renderExpenseRow(t) {
+  const options = DATA.categories.map(c =>
+    `<option value="${escapeHtml(c)}"${c === t.category ? " selected" : ""}>${escapeHtml(c)}</option>`
+  ).join("");
+  return `
+    <div class="expense-row">
+      <div class="expense-info">
+        <span class="expense-date">${escapeHtml(t.date)}</span>
+        <span class="expense-desc" title="${escapeHtml(t.description)}">${escapeHtml(t.description)}</span>
+      </div>
+      <span class="expense-amt">${fmt(t.amount)}</span>
+      <select class="expense-cat-select"
+        data-row="${t.row}" data-date="${escapeHtml(t.date)}"
+        data-description="${escapeHtml(t.description)}" data-amount="${t.amount}"
+        data-person="${escapeHtml(t.person)}" data-orig="${escapeHtml(t.category)}">
+        ${options}
+        <option value="__new__">+ New category…</option>
+      </select>
+    </div>`;
+}
+
+function renderRow(item, personFilter) {
   const pct = item.budget > 0 ? Math.min(item.actual / item.budget, 1) * 100 : 0;
   const amounts = item.status === "unbudgeted" ? fmt(item.actual) : `${fmt(item.actual)} / ${fmt(item.budget)}`;
+  const expenses = txForCategory(item.category, personFilter);
+  const listId = `expenses-${rowIdCounter++}`;
+  const expensesHtml = expenses.length
+    ? expenses.map(renderExpenseRow).join("")
+    : `<p class="no-expenses">No transactions this month.</p>`;
   return `
     <div class="row">
-      <div class="row-top">
-        <span>${item.category}</span>
+      <div class="row-top clickable" data-toggle="${listId}">
+        <span>${escapeHtml(item.category)}</span>
         <span class="row-amounts">${amounts}</span>
       </div>
       <div class="track"><div class="bar ${item.status}" style="width:${pct}%"></div></div>
       <p class="status-label ${item.status}">${statusLabel(item.status)}</p>
+      <div class="expense-list" id="${listId}" hidden>${expensesHtml}</div>
     </div>`;
+}
+
+function updatePendingBar() {
+  const count = Object.keys(pendingEdits).length;
+  const bar = document.getElementById("pending-bar");
+  if (count === 0) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  bar.querySelector(".pending-count").textContent =
+    `${count} category change${count === 1 ? "" : "s"} pending`;
+}
+
+function downloadPendingEdits() {
+  const edits = Object.values(pendingEdits);
+  if (edits.length === 0) return;
+  const blob = new Blob([JSON.stringify(edits, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `category-edits_${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function handleAppClick(e) {
+  const toggle = e.target.closest(".row-top.clickable");
+  if (!toggle) return;
+  const list = document.getElementById(toggle.dataset.toggle);
+  if (list) list.hidden = !list.hidden;
+}
+
+function handleAppChange(e) {
+  const select = e.target.closest(".expense-cat-select");
+  if (!select) return;
+
+  let newCategory = select.value;
+  if (newCategory === "__new__") {
+    const typed = prompt("New category name:");
+    if (!typed || !typed.trim()) {
+      select.value = select.dataset.orig;
+      return;
+    }
+    newCategory = typed.trim();
+    const opt = document.createElement("option");
+    opt.value = newCategory;
+    opt.textContent = newCategory;
+    opt.selected = true;
+    select.insertBefore(opt, select.lastElementChild);
+  }
+
+  const row = Number(select.dataset.row);
+  if (newCategory === select.dataset.orig) {
+    delete pendingEdits[row];
+    select.classList.remove("edited");
+  } else {
+    pendingEdits[row] = {
+      row,
+      date: select.dataset.date,
+      description: select.dataset.description,
+      amount: Number(select.dataset.amount),
+      person: select.dataset.person,
+      oldCategory: select.dataset.orig,
+      newCategory,
+    };
+    select.classList.add("edited");
+  }
+  updatePendingBar();
 }
 
 function render(data) {
@@ -110,19 +255,19 @@ function render(data) {
 
   const peopleHtml = Object.keys(data.people).map(name => {
     const p = data.people[name];
-    return `<div><h2>${name}</h2>${p.categories.map(renderRow).join("")}</div>`;
+    return `<div><h2>${name}</h2>${p.categories.map(item => renderRow(item, name)).join("")}</div>`;
   }).join("");
 
   const warningHtml = (data.unmatched && data.unmatched.length > 0) ? `
     <div class="warning-box">
       <p>⚠ Unmatched person values</p>
-      ${data.unmatched.map(u => `<div>"${u.name}" — ${fmt(u.amount)}</div>`).join("")}
+      ${data.unmatched.map(u => `<div>"${escapeHtml(u.name)}" — ${fmt(u.amount)}</div>`).join("")}
     </div>` : "";
 
   document.getElementById("app").innerHTML = `
     <div class="section">
       <h2>Household — combined, no split</h2>
-      ${data.household.map(renderRow).join("")}
+      ${data.household.map(item => renderRow(item, null)).join("")}
     </div>
     <div class="section people-grid">${peopleHtml}</div>
     <div class="metrics">
@@ -146,6 +291,10 @@ function render(data) {
 render(DATA);
 document.getElementById("generated-note").textContent =
   "Generated locally by build_dashboard.py — re-run it any time after a new import.";
+
+document.getElementById("app").addEventListener("click", handleAppClick);
+document.getElementById("app").addEventListener("change", handleAppChange);
+document.getElementById("download-edits-btn").addEventListener("click", downloadPendingEdits);
 </script>
 </body>
 </html>

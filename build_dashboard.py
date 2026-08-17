@@ -23,8 +23,9 @@ TEMPLATE_FILE = Path(__file__).parent / "dashboard_template.html"
 def compute_dashboard_data() -> dict:
     sheet = sheets_client.get_spreadsheet()
 
-    cat_rows = sheets_client.read_all_rows(sheet, config.CATEGORIES_TAB)
-    cfg = load_categories(cat_rows)
+    mapping_rows = sheets_client.read_all_rows(sheet, config.CATEGORY_MAPPINGS_TAB)
+    budget_rows = sheets_client.read_all_rows(sheet, config.CATEGORIES_TAB)
+    cfg = load_categories(mapping_rows, budget_rows)
 
     tx_rows = sheets_client.read_all_rows(sheet, config.TRANSACTIONS_TAB)
     current_month = datetime.now().strftime("%Y-%m")
@@ -34,29 +35,38 @@ def compute_dashboard_data() -> dict:
     personal_income: dict[str, float] = {}
     unmatched_people: dict[str, float] = {}
     matched_month_count = 0
+    transactions = []  # expense rows shown in a category section, for the dashboard's expand-to-view-expenses
 
-    for row in tx_rows[1:]:
+    for i, row in enumerate(tx_rows[1:]):
+        sheet_row = i + 2  # tx_rows includes the header at index 0, i.e. sheet row 1
         row = row + [""] * (8 - len(row))
-        _, description, amount_str, category, person, _, month, _ = row[:8]
+        date, description, amount_str, category, person, _, month, _ = row[:8]
 
         if month != current_month:
             continue
         matched_month_count += 1
 
         try:
-            amt = abs(float(amount_str))
+            raw_amt = float(amount_str)
         except ValueError:
-            amt = 0.0
+            raw_amt = 0.0
 
         category = category.strip()
         person_key = normalize_person(person)
+        cat_type = cfg.type_of(category)
+
+        # Transfers (moving money between your own accounts, Venmo/Zelle
+        # round-trips, etc.) aren't real spending — summing their absolute
+        # value double-counts every leg of the same money moving around.
+        # Keep the sign so inflows and outflows net against each other.
+        amt = raw_amt if cat_type == "Transfer" else abs(raw_amt)
 
         if person_key is None:
             raw_label = (person or "Unknown").strip() or "Unknown"
             unmatched_people[raw_label] = unmatched_people.get(raw_label, 0) + amt
             continue
 
-        if cfg.type_of(category) == "Income":
+        if cat_type == "Income":
             personal_income[person_key] = personal_income.get(person_key, 0) + amt
             continue
 
@@ -65,6 +75,11 @@ def compute_dashboard_data() -> dict:
         else:
             personal_actuals.setdefault(person_key, {})
             personal_actuals[person_key][category] = personal_actuals[person_key].get(category, 0) + amt
+
+        transactions.append({
+            "row": sheet_row, "date": date, "description": description,
+            "amount": amt, "category": category, "person": person_key,
+        })
 
     def build_category_list(categories, actuals_map, owner):
         section_total = 0.0
@@ -136,6 +151,8 @@ def compute_dashboard_data() -> dict:
             "net": grand_income - grand_expenses,
         },
         "unmatched": [{"name": k, "amount": v} for k, v in unmatched_people.items()],
+        "transactions": transactions,
+        "categories": sorted(cfg.types.keys()),
         "_debug": {
             "totalTransactionRows": len(tx_rows) - 1,
             "rowsMatchingCurrentMonth": matched_month_count,
@@ -153,7 +170,11 @@ def main():
         return
 
     template = TEMPLATE_FILE.read_text()
-    rendered = template.replace("__DASHBOARD_DATA__", json.dumps(data))
+    # Raw transaction descriptions are embedded in this JSON — escape "</" so
+    # a description containing "</script>" can't prematurely close the tag
+    # it's embedded in and break the page.
+    embedded_json = json.dumps(data).replace("</", "<\\/")
+    rendered = template.replace("__DASHBOARD_DATA__", embedded_json)
     OUTPUT_FILE.write_text(rendered)
 
     print(f"Wrote {OUTPUT_FILE}")
