@@ -16,6 +16,7 @@ SERVICE_ACCOUNT_FILE = "service_account.json"
 TRANSACTIONS_TAB = "Transactions"  # Date | Description | Amount | Category | Person | Week | Month | Source | Shared
 CATEGORIES_TAB = "Categories"                # Category | Owner | Monthly Budget | Type
 CATEGORY_MAPPINGS_TAB = "Category Mappings"  # Keyword | Category
+HISTORY_TAB = "History"                      # Month | Owner | Category | Budget | Actual | Remaining | Status
 
 def raw_import_tab_for(person: str) -> str:
     return f"Raw Import - {person}"

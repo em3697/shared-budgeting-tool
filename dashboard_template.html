@@ -113,6 +113,12 @@
   }
   .split-result.settled { color: var(--green); }
   .split-note { font-size: 11px; color: var(--ink-muted); margin-top: 8px; text-align: center; }
+  .overview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
+  .overview-grid > div { min-width: 0; }
+  @media (max-width: 560px) { .overview-grid { grid-template-columns: 1fr; } }
+  .overview-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .overview-card h3 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+  .overview-true-net { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-weight: 600; }
   #refresh-btn {
     font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); background: var(--card);
     border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer;
@@ -336,6 +342,22 @@ function renderSplitSection(data) {
           tracked income — edit either number to try a different ratio.
         </p>
       </div>
+      <div class="overview-grid">
+        <div class="overview-card">
+          <h3>${escapeHtml(a)} — overview</h3>
+          <div class="split-row"><span>Income</span><span id="overview-income-a"></span></div>
+          <div class="split-row"><span>Personal spending</span><span id="overview-personal-a"></span></div>
+          <div class="split-row"><span>Fair share of shared costs</span><span id="overview-fairshare-a"></span></div>
+          <div class="split-row overview-true-net"><span>True net this month</span><span id="overview-truenet-a"></span></div>
+        </div>
+        <div class="overview-card">
+          <h3>${escapeHtml(b)} — overview</h3>
+          <div class="split-row"><span>Income</span><span id="overview-income-b"></span></div>
+          <div class="split-row"><span>Personal spending</span><span id="overview-personal-b"></span></div>
+          <div class="split-row"><span>Fair share of shared costs</span><span id="overview-fairshare-b"></span></div>
+          <div class="split-row overview-true-net"><span>True net this month</span><span id="overview-truenet-b"></span></div>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -371,6 +393,32 @@ function updateSplitResult(data) {
   } else {
     result.textContent = `${a} owes ${b} ${fmt(-balanceA)}`;
   }
+
+  // Individual overview: actual tracked income (not the ratio inputs above,
+  // which may be a deliberately hypothetical ratio for splitting purposes)
+  // minus personal (non-shared) spending minus this person's fair share of
+  // shared costs at whatever ratio is currently set.
+  const trackedA = (data.people[a] && data.people[a].income) || 0;
+  const trackedB = (data.people[b] && data.people[b].income) || 0;
+  const personalA = (data.people[a] && data.people[a].expenses) || 0;
+  const personalB = (data.people[b] && data.people[b].expenses) || 0;
+  const trueNetA = trackedA - personalA - fairA;
+  const trueNetB = trackedB - personalB - fairB;
+
+  setText("overview-income-a", fmt(trackedA));
+  setText("overview-personal-a", fmt(personalA));
+  setText("overview-fairshare-a", fmt(fairA));
+  setText("overview-truenet-a", (trueNetA >= 0 ? "+" : "") + fmt(trueNetA));
+
+  setText("overview-income-b", fmt(trackedB));
+  setText("overview-personal-b", fmt(personalB));
+  setText("overview-fairshare-b", fmt(fairB));
+  setText("overview-truenet-b", (trueNetB >= 0 ? "+" : "") + fmt(trueNetB));
+}
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
 }
 
 function renderRow(item, personFilter) {

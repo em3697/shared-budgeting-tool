@@ -23,7 +23,7 @@ from flask import Flask, jsonify, request
 import config
 import sheets_client
 from apply_category_edits import apply_edits
-from build_dashboard import compute_dashboard_data
+from build_dashboard import compute_dashboard_data, record_history_snapshot
 from categorize import load_categories
 
 HOST = "127.0.0.1"
@@ -45,6 +45,16 @@ def _load_cfg_and_sheet():
     return sheet, cfg
 
 
+def _snapshot_best_effort(data: dict) -> None:
+    # History recording is a side effect on top of the dashboard's core job
+    # of showing current numbers — a failure here (rate limit, transient API
+    # error) should never take down page load or refresh.
+    try:
+        record_history_snapshot(data)
+    except Exception as e:
+        print(f"WARNING: could not record history snapshot: {e}")
+
+
 @app.route("/")
 def index():
     if not TEMPLATE_FILE.exists():
@@ -53,6 +63,7 @@ def index():
         data = compute_dashboard_data()
     except Exception as e:
         return f"Could not load data from the Sheet: {e}", 502
+    _snapshot_best_effort(data)
 
     embedded_json = json.dumps(data).replace("</", "<\\/")
     template = TEMPLATE_FILE.read_text()
@@ -66,6 +77,7 @@ def api_data():
         data = compute_dashboard_data()
     except Exception as e:
         return jsonify({"error": f"Could not load data from the Sheet: {e}"}), 502
+    _snapshot_best_effort(data)
     return jsonify(data)
 
 

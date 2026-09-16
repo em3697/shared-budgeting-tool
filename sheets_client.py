@@ -28,6 +28,16 @@ def read_all_rows(sheet, tab_name: str) -> list[list[str]]:
     return ws.get_all_values()
 
 
+def read_all_rows_safe(sheet, tab_name: str) -> list[list[str]]:
+    """Like read_all_rows, but returns [] instead of raising if the tab
+    doesn't exist yet — e.g. a History tab that hasn't been created by the
+    first snapshot."""
+    try:
+        return read_all_rows(sheet, tab_name)
+    except gspread.exceptions.WorksheetNotFound:
+        return []
+
+
 def append_rows(sheet, tab_name: str, rows: list[list]):
     if not rows:
         return

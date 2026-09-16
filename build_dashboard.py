@@ -206,8 +206,40 @@ def compute_dashboard_data() -> dict:
     }
 
 
+def record_history_snapshot(data: dict) -> None:
+    """Upserts this month's per-category budget-vs-actual rows into the
+    History tab. Past months' rows are left untouched; the current month's
+    block is fully replaced each time this runs, so re-running it throughout
+    an open month (every build/refresh) updates in place instead of piling
+    up duplicate rows."""
+    sheet = sheets_client.get_spreadsheet()
+    header = ["Month", "Owner", "Category", "Budget", "Actual", "Remaining", "Status"]
+
+    existing = sheets_client.read_all_rows_safe(sheet, config.HISTORY_TAB)
+    kept_rows = [r for r in existing[1:] if len(r) > 0 and r[0] != data["month"]] if existing else []
+
+    def snapshot_rows(owner: str, items: list[dict]) -> list[list[str]]:
+        return [
+            [data["month"], owner, item["category"], f"{item['budget']:.2f}",
+             f"{item['actual']:.2f}", f"{item['remaining']:.2f}", item["status"]]
+            for item in items
+        ]
+
+    new_rows = snapshot_rows("Household", data["household"])
+    for owner, pdata in data["people"].items():
+        new_rows += snapshot_rows(owner, pdata["categories"])
+
+    all_data_rows = sorted(kept_rows + new_rows, key=lambda r: (r[0], r[1], r[2]))
+    sheets_client.replace_tab_contents(sheet, config.HISTORY_TAB, [header] + all_data_rows, create_if_missing=True)
+
+
 def main():
     data = compute_dashboard_data()
+
+    try:
+        record_history_snapshot(data)
+    except Exception as e:
+        print(f"WARNING: could not record history snapshot: {e}")
 
     if not TEMPLATE_FILE.exists():
         print(f"ERROR: {TEMPLATE_FILE} not found. Make sure it's in the same folder as this script.")
