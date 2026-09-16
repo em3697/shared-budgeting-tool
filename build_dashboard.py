@@ -36,11 +36,13 @@ def compute_dashboard_data() -> dict:
     unmatched_people: dict[str, float] = {}
     matched_month_count = 0
     transactions = []  # expense rows shown in a category section, for the dashboard's expand-to-view-expenses
+    shared_total = 0.0
+    shared_paid_by_person: dict[str, float] = {}
 
     for i, row in enumerate(tx_rows[1:]):
         sheet_row = i + 2  # tx_rows includes the header at index 0, i.e. sheet row 1
-        row = row + [""] * (8 - len(row))
-        date, description, amount_str, category, person, _, month, _ = row[:8]
+        row = row + [""] * (9 - len(row))
+        date, description, amount_str, category, person, _, month, _, shared_str = row[:9]
 
         if month != current_month:
             continue
@@ -55,22 +57,50 @@ def compute_dashboard_data() -> dict:
         person_key = normalize_person(person)
         cat_type = cfg.type_of(category)
 
-        # Transfers (moving money between your own accounts, Venmo/Zelle
-        # round-trips, etc.) aren't real spending — summing their absolute
-        # value double-counts every leg of the same money moving around.
-        # Keep the sign so inflows and outflows net against each other.
-        amt = raw_amt if cat_type == "Transfer" else abs(raw_amt)
+        if cat_type == "Transfer":
+            # Moving money between your own accounts, Venmo/Zelle round-trips,
+            # etc. aren't real spending — summing absolute value double-counts
+            # every leg of the same money moving around. Keep the sign so
+            # inflows and outflows net against each other.
+            amt = raw_amt
+        elif cat_type == "Income":
+            amt = abs(raw_amt)
+        else:
+            # Expense categories: net actual spend, not gross activity. A
+            # reimbursement categorized into the same category as the expense
+            # it covers (e.g. paying for a group Airbnb under Travel, then
+            # putting the Venmos your friends send back under Travel too)
+            # should offset the charge instead of stacking on top of it as
+            # more "spending" — abs() was making both legs count as cost.
+            amt = -raw_amt
 
         if person_key is None:
             raw_label = (person or "Unknown").strip() or "Unknown"
             unmatched_people[raw_label] = unmatched_people.get(raw_label, 0) + amt
             continue
 
+        # The Shared column is the single source of truth for what counts as
+        # a joint cost — both for the split-and-settle-up total below and for
+        # which budget section (Household vs. a person's own) a transaction
+        # lands in. The Household section is no longer a fixed pre-configured
+        # category list: it's whatever actually has shared spend this month
+        # (build_category_list's "no budget line" fallback surfaces any
+        # category here that isn't pre-budgeted for Household). A normally-
+        # personal category with a shared transaction shows up under
+        # Household; a normally-household category with an unshared
+        # transaction shows up under that person's own section instead.
+        # Existing rows were backfilled from is_household_category; blank
+        # cells (shouldn't normally happen) fall back to the same default.
+        shared = shared_str.strip().upper() == "TRUE" if shared_str.strip() else cfg.is_household_category(category)
+        if shared:
+            shared_total += amt
+            shared_paid_by_person[person_key] = shared_paid_by_person.get(person_key, 0) + amt
+
         if cat_type == "Income":
             personal_income[person_key] = personal_income.get(person_key, 0) + amt
             continue
 
-        if cfg.is_household_category(category):
+        if shared:
             household_actuals[category] = household_actuals.get(category, 0) + amt
         else:
             personal_actuals.setdefault(person_key, {})
@@ -78,7 +108,12 @@ def compute_dashboard_data() -> dict:
 
         transactions.append({
             "row": sheet_row, "date": date, "description": description,
-            "amount": amt, "category": category, "person": person_key,
+            # "amount" is the display/spend-oriented value (sign-flipped for
+            # expense categories, above) — "rawAmount" is the literal sheet
+            # cell, which is what an edit's identity-match must be checked
+            # against in apply_category_edits.py.
+            "amount": amt, "rawAmount": raw_amt, "category": category, "person": person_key,
+            "shared": shared,
         })
 
     def build_category_list(categories, actuals_map, owner):
@@ -153,6 +188,11 @@ def compute_dashboard_data() -> dict:
         "unmatched": [{"name": k, "amount": v} for k, v in unmatched_people.items()],
         "transactions": transactions,
         "categories": sorted(cfg.types.keys()),
+        "peopleOrder": [p for p in config.PEOPLE if p in people],
+        "sharedExpenses": {
+            "total": shared_total,
+            "paidByPerson": shared_paid_by_person,
+        },
         "_debug": {
             "totalTransactionRows": len(tx_rows) - 1,
             "rowsMatchingCurrentMonth": matched_month_count,

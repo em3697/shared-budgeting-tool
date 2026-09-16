@@ -37,6 +37,7 @@
     margin-bottom: 24px;
   }
   h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .header-right { display: flex; align-items: center; gap: 10px; }
   .month-label { font-size: 13px; color: var(--ink-muted); }
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
   .section { margin-bottom: 28px; }
@@ -69,11 +70,18 @@
   .row-top.clickable { cursor: pointer; }
   .row-top.clickable:hover span:first-child { text-decoration: underline; }
   .expense-list { margin: 8px 0 0; padding-left: 10px; border-left: 2px solid var(--line); }
-  .expense-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 12px; }
-  .expense-info { display: flex; gap: 10px; flex: 1; min-width: 0; color: var(--ink-soft); }
+  .expense-row {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 6px 10px; padding: 6px 0; font-size: 12px;
+  }
+  .expense-info { display: flex; gap: 10px; flex: 1 1 180px; min-width: 0; color: var(--ink-soft); }
   .expense-date { flex-shrink: 0; color: var(--ink-muted); }
-  .expense-desc { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .expense-desc { flex: 1; white-space: normal; overflow-wrap: anywhere; }
+  .expense-controls { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .expense-amt { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .expense-shared { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
+  .expense-shared input { cursor: pointer; }
+  .expense-shared.edited { color: var(--amber); font-weight: 600; }
   .expense-cat-select { font-size: 12px; max-width: 150px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); padding: 2px 4px; }
   .expense-cat-select.edited { border-color: var(--amber); background: var(--amber-bg); }
   .no-expenses { margin: 4px 0; font-size: 12px; color: var(--ink-muted); }
@@ -88,25 +96,62 @@
     font: inherit; font-weight: 600; color: var(--ink); background: var(--paper);
     border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer;
   }
+  .split-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .split-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+  .split-row:last-of-type { margin-bottom: 0; }
+  .split-inputs { display: flex; gap: 16px; margin: 14px 0 4px; }
+  .split-input-group { flex: 1; min-width: 0; }
+  .split-input-group label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 4px; }
+  .split-input-group input {
+    width: 100%; font: inherit; font-variant-numeric: tabular-nums;
+    padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--paper); color: var(--ink);
+  }
+  .split-result {
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);
+    font-size: 14px; font-weight: 600; text-align: center; color: var(--ink);
+  }
+  .split-result.settled { color: var(--green); }
+  .split-note { font-size: 11px; color: var(--ink-muted); margin-top: 8px; text-align: center; }
+  #refresh-btn {
+    font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); background: var(--card);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer;
+  }
+  #refresh-btn:disabled { cursor: default; opacity: 0.6; }
+  #status-message {
+    font: inherit; font-size: 12px; white-space: pre-wrap; margin: 16px auto 0; max-width: 760px;
+    padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card);
+  }
+  #status-message.error { color: var(--red); background: var(--red-bg); border-color: #f0c9c9; }
+  #status-message.success { color: var(--green); background: var(--green-bg); border-color: #b9e5d4; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>Our budget</h1>
-    <span class="month-label" id="month-label"></span>
+    <div class="header-right">
+      <span class="month-label" id="month-label"></span>
+      <button type="button" id="refresh-btn">Refresh</button>
+    </div>
   </header>
   <div id="app"></div>
   <p class="generated-note" id="generated-note"></p>
+  <pre id="status-message" hidden></pre>
 </div>
 <div class="pending-bar" id="pending-bar" hidden>
   <span class="pending-count"></span>
+  <button type="button" id="save-changes-btn">Save changes</button>
   <button type="button" id="download-edits-btn">Download changes</button>
 </div>
 
 <script>
-// Data is baked in at generation time by build_dashboard.py — no fetch, no server.
-const DATA = __DASHBOARD_DATA__;
+// Data is baked in at generation/serve time. When opened as a static file
+// (build_dashboard.py's output) there's nothing to fetch from and Refresh /
+// Save changes will just fail with a clear network error — Download changes
+// still works. When served by server.py, Refresh and Save changes hit its
+// /api/* routes and DATA gets reassigned in place.
+let DATA = __DASHBOARD_DATA__;
 
 function fmt(n) {
   const v = Math.round(Number(n) || 0);
@@ -118,10 +163,94 @@ function statusLabel(status) {
   return status === "over" ? "Over budget" : status === "close" ? "Close to limit" : "On track";
 }
 
-// Category-edit staging: a transaction's new category never gets written to
-// the Sheet from here — this only builds a JSON file for apply_category_edits.py
-// to apply later, so the write credential never has to live in the browser.
-const pendingEdits = {}; // sheet row -> {row, date, description, amount, person, oldCategory, newCategory}
+function setStatusMessage(text, isError) {
+  const el = document.getElementById("status-message");
+  if (!text) {
+    el.hidden = true;
+    el.textContent = "";
+    el.classList.remove("error", "success");
+    return;
+  }
+  el.hidden = false;
+  el.textContent = text;
+  el.classList.toggle("error", !!isError);
+  el.classList.toggle("success", !isError);
+}
+
+// A page opened as a local file (build_dashboard.py's static export, or a
+// leftover browser tab from it) has no server to fetch from — surface that
+// plainly instead of letting it fail as a generic "Failed to fetch".
+const STATIC_FILE_MESSAGE =
+  "This is a static snapshot (opened as a local file), so it can't refresh or save live. " +
+  "Run ./run_budget.sh serve and use the page it opens (http://127.0.0.1:5151/) instead.";
+
+async function refreshData() {
+  if (location.protocol === "file:") {
+    setStatusMessage(STATIC_FILE_MESSAGE, true);
+    return;
+  }
+  const btn = document.getElementById("refresh-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Refreshing…"; }
+  try {
+    const res = await fetch("/api/data");
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+    DATA = body;
+    render(DATA);
+  } catch (err) {
+    setStatusMessage(`Could not refresh: ${err.message}`, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Refresh"; }
+  }
+}
+
+async function saveChanges() {
+  const edits = Object.values(pendingEdits);
+  if (edits.length === 0) return;
+  if (location.protocol === "file:") {
+    setStatusMessage(STATIC_FILE_MESSAGE, true);
+    return;
+  }
+  const btn = document.getElementById("save-changes-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  try {
+    const res = await fetch("/api/edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(edits),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+
+    // Only clear edits the server actually applied — anything it skipped
+    // stays staged and visibly flagged, never silently dropped.
+    const skippedRows = new Set((body.skipped || []).map(s => s.row));
+    for (const row of Object.keys(pendingEdits).map(Number)) {
+      if (!skippedRows.has(row)) delete pendingEdits[row];
+    }
+    updatePendingBar();
+
+    if (body.skipped && body.skipped.length > 0) {
+      const lines = body.skipped.map(s => `Row ${s.row} (${s.description}): ${s.reason}`);
+      setStatusMessage(`Saved ${body.applied} change(s). Skipped ${body.skipped.length}:\n${lines.join("\n")}`, true);
+    } else {
+      setStatusMessage(`Saved ${body.applied} change(s).`, false);
+    }
+    await refreshData();
+  } catch (err) {
+    setStatusMessage(`Could not save changes: ${err.message}`, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Save changes"; }
+  }
+}
+
+// Edit staging: a transaction's new category or Shared flag never gets
+// written to the Sheet from here — this only builds a JSON file for
+// apply_category_edits.py to apply later, so the write credential never has
+// to live in the browser. A row can carry a category change, a Shared
+// change, or both — fields are merged in and pruned independently.
+// sheet row -> {row, date, description, amount, person, [oldCategory, newCategory], [oldShared, newShared]}
+const pendingEdits = {};
 let rowIdCounter = 0;
 
 function escapeHtml(s) {
@@ -147,19 +276,105 @@ function renderExpenseRow(t) {
         <span class="expense-date">${escapeHtml(t.date)}</span>
         <span class="expense-desc" title="${escapeHtml(t.description)}">${escapeHtml(t.description)}</span>
       </div>
-      <span class="expense-amt">${fmt(t.amount)}</span>
-      <select class="expense-cat-select"
-        data-row="${t.row}" data-date="${escapeHtml(t.date)}"
-        data-description="${escapeHtml(t.description)}" data-amount="${t.amount}"
-        data-person="${escapeHtml(t.person)}" data-orig="${escapeHtml(t.category)}">
-        ${options}
-        <option value="__new__">+ New category…</option>
-      </select>
+      <div class="expense-controls">
+        <span class="expense-amt">${fmt(t.amount)}</span>
+        <label class="expense-shared">
+          <input type="checkbox" class="expense-shared-toggle"
+            data-row="${t.row}" data-date="${escapeHtml(t.date)}"
+            data-description="${escapeHtml(t.description)}" data-amount="${t.rawAmount}"
+            data-person="${escapeHtml(t.person)}" data-orig-shared="${t.shared ? "1" : "0"}"
+            ${t.shared ? "checked" : ""}>
+          Shared
+        </label>
+        <select class="expense-cat-select"
+          data-row="${t.row}" data-date="${escapeHtml(t.date)}"
+          data-description="${escapeHtml(t.description)}" data-amount="${t.rawAmount}"
+          data-person="${escapeHtml(t.person)}" data-orig="${escapeHtml(t.category)}">
+          ${options}
+          <option value="__new__">+ New category…</option>
+        </select>
+      </div>
     </div>`;
 }
 
+function renderSplitSection(data) {
+  const people = data.peopleOrder || [];
+  if (people.length !== 2) return "";
+  const [a, b] = people;
+  const shared = data.sharedExpenses || { total: 0, paidByPerson: {} };
+  const paidA = shared.paidByPerson[a] || 0;
+  const paidB = shared.paidByPerson[b] || 0;
+  const trackedIncomeA = Math.round((data.people[a] && data.people[a].income) || 0);
+  const trackedIncomeB = Math.round((data.people[b] && data.people[b].income) || 0);
+  const storedA = Number(localStorage.getItem("splitIncome_" + a));
+  const storedB = Number(localStorage.getItem("splitIncome_" + b));
+  const startA = storedA > 0 ? storedA : trackedIncomeA;
+  const startB = storedB > 0 ? storedB : trackedIncomeB;
+
+  return `
+    <div class="section">
+      <h2>Shared expenses — split &amp; settle up</h2>
+      <div class="split-card">
+        <div class="split-row"><span>Total shared spending this month</span><span>${fmt(shared.total)}</span></div>
+        <div class="split-row"><span>Paid by ${escapeHtml(a)}</span><span>${fmt(paidA)}</span></div>
+        <div class="split-row"><span>Paid by ${escapeHtml(b)}</span><span>${fmt(paidB)}</span></div>
+        <div class="split-inputs">
+          <div class="split-input-group">
+            <label for="split-income-a">${escapeHtml(a)}'s income</label>
+            <input type="number" id="split-income-a" min="0" step="1" value="${startA}">
+          </div>
+          <div class="split-input-group">
+            <label for="split-income-b">${escapeHtml(b)}'s income</label>
+            <input type="number" id="split-income-b" min="0" step="1" value="${startB}">
+          </div>
+        </div>
+        <div class="split-result" id="split-result"></div>
+        <p class="split-note">
+          Includes every transaction below marked "Shared", regardless of category. Costs are
+          split in proportion to the incomes above (e.g. if ${escapeHtml(b)} earns 1.2x
+          ${escapeHtml(a)}, ${escapeHtml(b)} covers 1.2x the share). Defaults to this month's
+          tracked income — edit either number to try a different ratio.
+        </p>
+      </div>
+    </div>`;
+}
+
+function updateSplitResult(data) {
+  const people = data.peopleOrder || [];
+  if (people.length !== 2) return;
+  const [a, b] = people;
+  const inputA = document.getElementById("split-income-a");
+  const inputB = document.getElementById("split-income-b");
+  const result = document.getElementById("split-result");
+  if (!inputA || !inputB || !result) return;
+
+  const incomeA = Math.max(0, Number(inputA.value) || 0);
+  const incomeB = Math.max(0, Number(inputB.value) || 0);
+  localStorage.setItem("splitIncome_" + a, String(incomeA));
+  localStorage.setItem("splitIncome_" + b, String(incomeB));
+
+  const shared = data.sharedExpenses || { total: 0, paidByPerson: {} };
+  const paidA = shared.paidByPerson[a] || 0;
+  const paidB = shared.paidByPerson[b] || 0;
+  const totalIncome = incomeA + incomeB;
+  const shareA = totalIncome > 0 ? incomeA / totalIncome : 0.5;
+  const fairA = shared.total * shareA;
+  const fairB = shared.total * (1 - shareA);
+  const balanceA = paidA - fairA; // positive: A paid more than their fair share
+
+  result.classList.remove("settled");
+  if (Math.abs(balanceA) < 1) {
+    result.textContent = "All settled up";
+    result.classList.add("settled");
+  } else if (balanceA > 0) {
+    result.textContent = `${b} owes ${a} ${fmt(balanceA)}`;
+  } else {
+    result.textContent = `${a} owes ${b} ${fmt(-balanceA)}`;
+  }
+}
+
 function renderRow(item, personFilter) {
-  const pct = item.budget > 0 ? Math.min(item.actual / item.budget, 1) * 100 : 0;
+  const pct = item.budget > 0 ? Math.max(0, Math.min(item.actual / item.budget, 1) * 100) : 0;
   const amounts = item.status === "unbudgeted" ? fmt(item.actual) : `${fmt(item.actual)} / ${fmt(item.budget)}`;
   const expenses = txForCategory(item.category, personFilter);
   const listId = `expenses-${rowIdCounter++}`;
@@ -187,7 +402,7 @@ function updatePendingBar() {
   }
   bar.hidden = false;
   bar.querySelector(".pending-count").textContent =
-    `${count} category change${count === 1 ? "" : "s"} pending`;
+    `${count} change${count === 1 ? "" : "s"} pending`;
 }
 
 function downloadPendingEdits() {
@@ -212,10 +427,28 @@ function handleAppClick(e) {
   if (list) list.hidden = !list.hidden;
 }
 
-function handleAppChange(e) {
-  const select = e.target.closest(".expense-cat-select");
-  if (!select) return;
+function ensurePendingEdit(dataset) {
+  const row = Number(dataset.row);
+  if (!pendingEdits[row]) {
+    pendingEdits[row] = {
+      row,
+      date: dataset.date,
+      description: dataset.description,
+      amount: Number(dataset.amount),
+      person: dataset.person,
+    };
+  }
+  return pendingEdits[row];
+}
 
+function prunePendingEdit(row) {
+  const edit = pendingEdits[row];
+  if (edit && !("newCategory" in edit) && !("newShared" in edit)) {
+    delete pendingEdits[row];
+  }
+}
+
+function handleCategoryChange(select) {
   let newCategory = select.value;
   if (newCategory === "__new__") {
     const typed = prompt("New category name:");
@@ -232,22 +465,49 @@ function handleAppChange(e) {
   }
 
   const row = Number(select.dataset.row);
+  const edit = ensurePendingEdit(select.dataset);
   if (newCategory === select.dataset.orig) {
-    delete pendingEdits[row];
+    delete edit.newCategory;
+    delete edit.oldCategory;
     select.classList.remove("edited");
   } else {
-    pendingEdits[row] = {
-      row,
-      date: select.dataset.date,
-      description: select.dataset.description,
-      amount: Number(select.dataset.amount),
-      person: select.dataset.person,
-      oldCategory: select.dataset.orig,
-      newCategory,
-    };
+    edit.oldCategory = select.dataset.orig;
+    edit.newCategory = newCategory;
     select.classList.add("edited");
   }
+  prunePendingEdit(row);
   updatePendingBar();
+}
+
+function handleSharedToggle(checkbox) {
+  const row = Number(checkbox.dataset.row);
+  const origShared = checkbox.dataset.origShared === "1";
+  const newShared = checkbox.checked;
+  const label = checkbox.closest(".expense-shared");
+  const edit = ensurePendingEdit(checkbox.dataset);
+  if (newShared === origShared) {
+    delete edit.newShared;
+    delete edit.oldShared;
+    if (label) label.classList.remove("edited");
+  } else {
+    edit.oldShared = origShared;
+    edit.newShared = newShared;
+    if (label) label.classList.add("edited");
+  }
+  prunePendingEdit(row);
+  updatePendingBar();
+}
+
+function handleAppChange(e) {
+  const select = e.target.closest(".expense-cat-select");
+  if (select) {
+    handleCategoryChange(select);
+    return;
+  }
+  const checkbox = e.target.closest(".expense-shared-toggle");
+  if (checkbox) {
+    handleSharedToggle(checkbox);
+  }
 }
 
 function render(data) {
@@ -266,9 +526,10 @@ function render(data) {
 
   document.getElementById("app").innerHTML = `
     <div class="section">
-      <h2>Household — combined, no split</h2>
+      <h2>Household — combined</h2>
       ${data.household.map(item => renderRow(item, null)).join("")}
     </div>
+    ${renderSplitSection(data)}
     <div class="section people-grid">${peopleHtml}</div>
     <div class="metrics">
       <div class="metric">
@@ -286,6 +547,13 @@ function render(data) {
     </div>
     ${warningHtml}
   `;
+  updateSplitResult(data);
+}
+
+function handleAppInput(e) {
+  if (e.target.id === "split-income-a" || e.target.id === "split-income-b") {
+    updateSplitResult(DATA);
+  }
 }
 
 render(DATA);
@@ -294,7 +562,13 @@ document.getElementById("generated-note").textContent =
 
 document.getElementById("app").addEventListener("click", handleAppClick);
 document.getElementById("app").addEventListener("change", handleAppChange);
+document.getElementById("app").addEventListener("input", handleAppInput);
 document.getElementById("download-edits-btn").addEventListener("click", downloadPendingEdits);
+document.getElementById("save-changes-btn").addEventListener("click", saveChanges);
+document.getElementById("refresh-btn").addEventListener("click", () => {
+  setStatusMessage("");
+  refreshData();
+});
 </script>
 </body>
 </html>

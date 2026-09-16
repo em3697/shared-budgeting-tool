@@ -35,30 +35,62 @@ def append_rows(sheet, tab_name: str, rows: list[list]):
     ws.append_rows(rows, value_input_option="RAW")
 
 
-def set_real_dates(sheet, tab_name: str, start_row: int, date_strs: list[str]):
-    """Rewrites the Date column (A) for the given 1-indexed row range using
-    USER_ENTERED, so Sheets parses each "YYYY-MM-DD" string into a real date
-    value instead of leaving it as plain text. Only ever call this on column
-    A — every other column must stay RAW to avoid the auto-date-coercion bug
-    described above (e.g. Month values like "2026-08")."""
-    if not date_strs:
+def set_column_values(sheet, tab_name: str, column_letter: str, start_row: int, values: list[str]):
+    """Writes a single contiguous column range in one call, via USER_ENTERED
+    so Sheets parses each value into its native type (a real date, a real
+    boolean) instead of leaving it as plain text. Only safe for values with
+    no locale-ambiguous parsing risk — ISO dates, "TRUE"/"FALSE" — never for
+    free text or things like Month values ("2026-08" would get coerced into
+    a date)."""
+    if not values:
         return
     ws = sheet.worksheet(tab_name)
-    end_row = start_row + len(date_strs) - 1
-    ws.update(f"A{start_row}:A{end_row}", [[d] for d in date_strs], value_input_option="USER_ENTERED")
+    end_row = start_row + len(values) - 1
+    ws.update(f"{column_letter}{start_row}:{column_letter}{end_row}", [[v] for v in values], value_input_option="USER_ENTERED")
 
 
-def update_cells(sheet, tab_name: str, cell_values: dict[str, str]):
-    """Writes each cell (keyed by A1 notation, e.g. 'D42') as plain text —
-    RAW, same reasoning as append_rows: these are category labels, never
-    dates, so nothing here should go through Sheets' USER_ENTERED parsing."""
+def set_real_dates(sheet, tab_name: str, start_row: int, date_strs: list[str]):
+    """Rewrites the Date column (A) for the given 1-indexed row range so
+    Sheets parses each "YYYY-MM-DD" string into a real date value instead of
+    leaving it as plain text."""
+    set_column_values(sheet, tab_name, "A", start_row, date_strs)
+
+
+def update_cells(sheet, tab_name: str, cell_values: dict[str, str], value_input_option: str = "RAW"):
+    """Writes each cell (keyed by A1 notation, e.g. 'D42'). Defaults to RAW —
+    plain text, no parsing — which is the safe choice for anything Sheets
+    could misread, like category labels or month strings. Pass
+    value_input_option="USER_ENTERED" only for values with no
+    locale-ambiguous parsing risk, e.g. "TRUE"/"FALSE" for a boolean column."""
     if not cell_values:
         return
     ws = sheet.worksheet(tab_name)
     ws.batch_update(
         [{"range": a1, "values": [[value]]} for a1, value in cell_values.items()],
-        value_input_option="RAW",
+        value_input_option=value_input_option,
     )
+
+
+def set_boolean_data_validation(sheet, tab_name: str, column_letter: str, start_row: int, end_row: int):
+    """Applies checkbox data validation to a column range so it renders as
+    native Sheets checkboxes. The rule stays attached to the range going
+    forward, so rows appended later (within end_row) render as checkboxes
+    too without needing to reapply this."""
+    ws = sheet.worksheet(tab_name)
+    sheet.batch_update({
+        "requests": [{
+            "setDataValidation": {
+                "range": {
+                    "sheetId": ws.id,
+                    "startRowIndex": start_row - 1,
+                    "endRowIndex": end_row,
+                    "startColumnIndex": gspread.utils.a1_to_rowcol(f"{column_letter}1")[1] - 1,
+                    "endColumnIndex": gspread.utils.a1_to_rowcol(f"{column_letter}1")[1],
+                },
+                "rule": {"condition": {"type": "BOOLEAN"}, "strict": True},
+            }
+        }]
+    })
 
 
 def replace_tab_contents(sheet, tab_name: str, rows: list[list], create_if_missing: bool = False):

@@ -120,6 +120,7 @@ def main():
             continue
 
     new_rows = []
+    shared_defaults = []
     skipped_duplicate = 0
     new_categories = []
     seen_new_categories = set()
@@ -165,6 +166,7 @@ def main():
             get_month_label(date_obj),
             "SoFi",
         ])
+        shared_defaults.append("TRUE" if cfg.is_household_category(category) else "FALSE")
         existing_keys.add(key)
 
     if not new_rows:
@@ -174,6 +176,7 @@ def main():
     start_row = len(tx_rows) + 1  # tx_rows includes the header, rows are 1-indexed
     sheets_client.append_rows(sheet, config.TRANSACTIONS_TAB, new_rows)
     sheets_client.set_real_dates(sheet, config.TRANSACTIONS_TAB, start_row, [row[0] for row in new_rows])
+    sheets_client.set_column_values(sheet, config.TRANSACTIONS_TAB, "I", start_row, shared_defaults)
 
     print(f"Imported {len(new_rows)} new transaction(s) for {args.person} "
           f"({skipped_duplicate} skipped as duplicates).")
