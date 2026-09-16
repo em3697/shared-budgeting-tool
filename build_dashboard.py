@@ -58,12 +58,16 @@ def compute_dashboard_data() -> dict:
         cat_type = cfg.type_of(category)
 
         if cat_type == "Transfer":
-            # Moving money between your own accounts, Venmo/Zelle round-trips,
-            # etc. aren't real spending — summing absolute value double-counts
-            # every leg of the same money moving around. Keep the sign so
-            # inflows and outflows net against each other.
-            amt = raw_amt
-        elif cat_type == "Income":
+            # Internal account transfers, Venmo/Zelle round-trips, and
+            # credit-card bill payments aren't real spending or a cost to
+            # split with anyone — they're just money moving between your own
+            # tracked accounts (e.g. paying off a card whose purchases are
+            # already tracked under their real categories elsewhere).
+            # Exclude them from the dashboard entirely rather than netting
+            # them into a category that would still show up in the UI.
+            continue
+
+        if cat_type == "Income":
             amt = abs(raw_amt)
         else:
             # Expense categories: net actual spend, not gross activity. A
