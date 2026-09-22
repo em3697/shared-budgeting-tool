@@ -20,7 +20,7 @@ import pandas as pd
 
 import config
 import sheets_client
-from categorize import load_categories
+from categorize import is_generic_transfer_description, load_categories
 
 # SoFi's downloaded filename looks like:
 #   1786904674519_SoFi-Relay-All-Transactions_2026-08-16.csv
@@ -150,7 +150,17 @@ def main():
             continue
 
         sofi_category = str(r.get("Primary Category", "")).strip()
-        category = cfg.match_category(description) or sofi_category or "Uncategorized"
+        matched_category = cfg.match_category(description)
+        if matched_category:
+            category = matched_category
+        elif sofi_category == "Transfers" and not is_generic_transfer_description(description):
+            # A named-person P2P payment (e.g. "Matt Freer 'Movers'") isn't
+            # an internal transfer just because SoFi defaults it there —
+            # fall back to Uncategorized so it surfaces for review instead
+            # of silently vanishing into the fully-excluded Transfers bucket.
+            category = "Uncategorized"
+        else:
+            category = sofi_category or "Uncategorized"
 
         if category not in cfg.types and category not in seen_new_categories:
             seen_new_categories.add(category)

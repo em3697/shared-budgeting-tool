@@ -11,10 +11,14 @@ process exactly like it does in every other script here — it never reaches
 the browser.
 
 Usage:
-    python server.py
+    python server.py             normal mode — restart manually after code changes
+    python server.py --reload    auto-restarts when a .py or .html file changes
+                                  (Flask's dev reloader; for active development only)
 """
 
+import argparse
 import json
+import os
 import webbrowser
 from pathlib import Path
 
@@ -25,6 +29,7 @@ import sheets_client
 from apply_category_edits import apply_edits
 from build_dashboard import compute_dashboard_data, record_history_snapshot
 from categorize import load_categories
+from manage_categories import upsert_categories
 
 HOST = "127.0.0.1"
 PORT = 5151  # not 5000 — collides with macOS AirPlay Receiver
@@ -99,10 +104,41 @@ def api_edits():
     return jsonify({"applied": applied, "skipped": skipped, "newCategories": new_categories})
 
 
+@app.route("/api/categories", methods=["POST"])
+def api_categories():
+    body = request.get_json(silent=True)
+    if not isinstance(body, list):
+        return jsonify({"error": "Expected a JSON array of category edits."}), 400
+    if not body:
+        return jsonify({"applied": 0, "errors": []})
+
+    try:
+        sheet = sheets_client.get_spreadsheet()
+        budget_rows = sheets_client.read_all_rows(sheet, config.CATEGORIES_TAB)
+        applied, errors = upsert_categories(sheet, budget_rows, body)
+    except Exception as e:
+        return jsonify({"error": f"Could not reach the Sheet: {e}"}), 502
+
+    return jsonify({"applied": applied, "errors": errors})
+
+
 def main():
-    url = f"http://{HOST}:{PORT}/"
-    webbrowser.open(url)
-    app.run(host=HOST, port=PORT, debug=False)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--reload", action="store_true",
+        help="Auto-restart the server when source files change, instead of needing "
+             "a manual Ctrl+C + rerun after every code update. Off by default."
+    )
+    args = parser.parse_args()
+
+    # With --reload, Werkzeug's reloader re-executes this whole script in a
+    # child process (setting WERKZEUG_RUN_MAIN=true there) every time it
+    # restarts — main() runs again from scratch each time. Only open the
+    # browser on the very first launch, not on every subsequent auto-restart.
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        webbrowser.open(f"http://{HOST}:{PORT}/")
+
+    app.run(host=HOST, port=PORT, debug=False, use_reloader=args.reload)
 
 
 if __name__ == "__main__":

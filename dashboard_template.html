@@ -99,7 +99,7 @@
   .split-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
   .split-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
   .split-row:last-of-type { margin-bottom: 0; }
-  .split-inputs { display: flex; gap: 16px; margin: 14px 0 4px; }
+  .split-inputs { display: flex; flex-wrap: wrap; gap: 16px; margin: 14px 0 4px; }
   .split-input-group { flex: 1; min-width: 0; }
   .split-input-group label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 4px; }
   .split-input-group input {
@@ -119,6 +119,29 @@
   .overview-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
   .overview-card h3 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
   .overview-true-net { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-section-gap { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+  .value-positive { color: var(--green); }
+  .value-negative { color: var(--red); }
+  .budget-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .budget-editor label { color: var(--ink-soft); flex-shrink: 0; }
+  .budget-editor input {
+    width: 90px; font: inherit; font-variant-numeric: tabular-nums; padding: 4px 6px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink);
+  }
+  .budget-save-btn {
+    font: inherit; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer;
+  }
+  .budget-save-btn:disabled { cursor: default; opacity: 0.6; }
+  .budget-save-status { font-size: 11px; color: var(--ink-muted); }
+  .budget-save-status.error { color: var(--red); }
+  .budget-save-status.success { color: var(--green); }
+  .add-category-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .add-category-actions button {
+    font: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer;
+  }
+  .add-category-actions button:disabled { cursor: default; opacity: 0.6; }
   #refresh-btn {
     font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); background: var(--card);
     border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer;
@@ -190,6 +213,35 @@ const STATIC_FILE_MESSAGE =
   "This is a static snapshot (opened as a local file), so it can't refresh or save live. " +
   "Run ./run_budget.sh serve and use the page it opens (http://127.0.0.1:5151/) instead.";
 
+// Every API call goes through this so a stale server process (e.g. one
+// still running from before a route was added — Flask doesn't hot-reload
+// without debug mode) fails with a clear, actionable message instead of a
+// raw "Unexpected token '<'" from trying to JSON-parse an HTML error page.
+async function apiFetch(url, options) {
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    throw new Error(`Could not reach the server: ${err.message}`);
+  }
+
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const text = (await res.text()).trim();
+    if (res.status === 404 || text.toLowerCase().startsWith("<!doctype")) {
+      throw new Error(
+        "Server returned an unexpected page — it's likely running old code. " +
+        "Restart it (Ctrl+C, then ./run_budget.sh serve) and reload this page."
+      );
+    }
+    throw new Error(`Unexpected response (status ${res.status}): ${text.slice(0, 200)}`);
+  }
+
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  return body;
+}
+
 async function refreshData() {
   if (location.protocol === "file:") {
     setStatusMessage(STATIC_FILE_MESSAGE, true);
@@ -198,10 +250,7 @@ async function refreshData() {
   const btn = document.getElementById("refresh-btn");
   if (btn) { btn.disabled = true; btn.textContent = "Refreshing…"; }
   try {
-    const res = await fetch("/api/data");
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
-    DATA = body;
+    DATA = await apiFetch("/api/data");
     render(DATA);
   } catch (err) {
     setStatusMessage(`Could not refresh: ${err.message}`, true);
@@ -220,13 +269,11 @@ async function saveChanges() {
   const btn = document.getElementById("save-changes-btn");
   if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
   try {
-    const res = await fetch("/api/edits", {
+    const body = await apiFetch("/api/edits", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(edits),
     });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
 
     // Only clear edits the server actually applied — anything it skipped
     // stays staged and visibly flagged, never silently dropped.
@@ -349,6 +396,9 @@ function renderSplitSection(data) {
           <div class="split-row"><span>Personal spending</span><span id="overview-personal-a"></span></div>
           <div class="split-row"><span>Fair share of shared costs</span><span id="overview-fairshare-a"></span></div>
           <div class="split-row overview-true-net"><span>True net this month</span><span id="overview-truenet-a"></span></div>
+          <div class="split-row overview-section-gap"><span>Expected income</span><span id="overview-expected-income-a"></span></div>
+          <div class="split-row"><span>Budgeted expenses</span><span id="overview-budgeted-expenses-a"></span></div>
+          <div class="split-row overview-true-net"><span>Budget surplus / deficit</span><span id="overview-budget-diff-a"></span></div>
         </div>
         <div class="overview-card">
           <h3>${escapeHtml(b)} — overview</h3>
@@ -356,6 +406,9 @@ function renderSplitSection(data) {
           <div class="split-row"><span>Personal spending</span><span id="overview-personal-b"></span></div>
           <div class="split-row"><span>Fair share of shared costs</span><span id="overview-fairshare-b"></span></div>
           <div class="split-row overview-true-net"><span>True net this month</span><span id="overview-truenet-b"></span></div>
+          <div class="split-row overview-section-gap"><span>Expected income</span><span id="overview-expected-income-b"></span></div>
+          <div class="split-row"><span>Budgeted expenses</span><span id="overview-budgeted-expenses-b"></span></div>
+          <div class="split-row overview-true-net"><span>Budget surplus / deficit</span><span id="overview-budget-diff-b"></span></div>
         </div>
       </div>
     </div>`;
@@ -408,17 +461,139 @@ function updateSplitResult(data) {
   setText("overview-income-a", fmt(trackedA));
   setText("overview-personal-a", fmt(personalA));
   setText("overview-fairshare-a", fmt(fairA));
-  setText("overview-truenet-a", (trueNetA >= 0 ? "+" : "") + fmt(trueNetA));
+  setSignedText("overview-truenet-a", trueNetA);
 
   setText("overview-income-b", fmt(trackedB));
   setText("overview-personal-b", fmt(personalB));
   setText("overview-fairshare-b", fmt(fairB));
-  setText("overview-truenet-b", (trueNetB >= 0 ? "+" : "") + fmt(trueNetB));
+  setSignedText("overview-truenet-b", trueNetB);
+
+  // Budget-vs-income check: does the plan add up, not just this month's
+  // actuals? "Expected income" here is the SAME number you typed into the
+  // "'s income" boxes above (incomeA/incomeB) — that's the explicit figure
+  // you're actually editing, not the separate per-income-category budgets
+  // in the "Income sources" section below. Reuses shareA (same ratio as the
+  // actual settle-up split above) for the household budget's fair share, so
+  // both halves of this check come from the one number you set.
+  const expectedIncomeA = incomeA;
+  const expectedIncomeB = incomeB;
+
+  const personalBudgetA = sumBudgets(data.people[a] && data.people[a].categories);
+  const personalBudgetB = sumBudgets(data.people[b] && data.people[b].categories);
+  const householdBudgetTotal = sumBudgets(data.household);
+  const fairShareBudgetA = householdBudgetTotal * shareA;
+  const fairShareBudgetB = householdBudgetTotal * (1 - shareA);
+  const budgetedExpensesA = personalBudgetA + fairShareBudgetA;
+  const budgetedExpensesB = personalBudgetB + fairShareBudgetB;
+
+  setText("overview-expected-income-a", fmt(expectedIncomeA));
+  setText("overview-budgeted-expenses-a", fmt(budgetedExpensesA));
+  setSignedText("overview-budget-diff-a", expectedIncomeA - budgetedExpensesA);
+
+  setText("overview-expected-income-b", fmt(expectedIncomeB));
+  setText("overview-budgeted-expenses-b", fmt(budgetedExpensesB));
+  setSignedText("overview-budget-diff-b", expectedIncomeB - budgetedExpensesB);
+}
+
+function renderIncomeCategoryRow(item, owner) {
+  return `
+    <div class="row">
+      <div class="row-top">
+        <span>${escapeHtml(item.category)}</span>
+        <span class="row-amounts">${fmt(item.actual)} received</span>
+      </div>
+      ${renderBudgetEditor(item.category, owner, item.budget, "Target")}
+    </div>`;
+}
+
+function renderIncomeSection(data) {
+  const owners = data.peopleOrder || Object.keys(data.people || {});
+  if (owners.length === 0) return "";
+
+  const cardsHtml = owners.map(owner => {
+    const p = data.people[owner] || {};
+    const items = p.incomeCategories || [];
+    const rowsHtml = items.length
+      ? items.map(item => renderIncomeCategoryRow(item, owner)).join("")
+      : `<p class="no-expenses">No income tracked this month.</p>`;
+    return `<div class="overview-card"><h3>${escapeHtml(owner)}</h3>${rowsHtml}</div>`;
+  }).join("");
+
+  return `
+    <div class="section">
+      <h2>Income sources</h2>
+      <div class="overview-grid">${cardsHtml}</div>
+      <p class="split-note">
+        Per-source tracking only — the "Expected income" used in the overview above comes from the
+        "'s income" boxes in the split calculator, not the targets set here.
+      </p>
+    </div>`;
+}
+
+function renderAddCategorySection(data) {
+  const owners = ["Household", ...(data.peopleOrder || [])];
+  const ownerOptions = owners.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
+  return `
+    <div class="section">
+      <h2>Add a category</h2>
+      <div class="split-card">
+        <div class="split-inputs">
+          <div class="split-input-group">
+            <label for="new-cat-name">Name</label>
+            <input type="text" id="new-cat-name" placeholder="e.g. Car Repair">
+          </div>
+          <div class="split-input-group">
+            <label for="new-cat-owner">Owner</label>
+            <select id="new-cat-owner">${ownerOptions}</select>
+          </div>
+          <div class="split-input-group">
+            <label for="new-cat-type">Type</label>
+            <select id="new-cat-type">
+              <option value="Expense">Expense</option>
+              <option value="Income">Income</option>
+              <option value="Transfer">Transfer</option>
+            </select>
+          </div>
+          <div class="split-input-group">
+            <label for="new-cat-budget">Monthly budget</label>
+            <input type="number" id="new-cat-budget" min="0" step="1" value="0">
+          </div>
+        </div>
+        <div class="add-category-actions">
+          <button type="button" id="add-category-btn">Add category</button>
+          <span class="budget-save-status" id="add-category-status"></span>
+        </div>
+      </div>
+    </div>`;
 }
 
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+function setSignedText(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = (value >= 0 ? "+" : "") + fmt(value);
+  el.classList.toggle("value-positive", value >= 0);
+  el.classList.toggle("value-negative", value < 0);
+}
+
+function sumBudgets(items) {
+  return (items || []).reduce((sum, item) => sum + (item.budget || 0), 0);
+}
+
+function renderBudgetEditor(category, owner, budget, label) {
+  return `
+    <div class="budget-editor">
+      <label>${escapeHtml(label || "Monthly budget")}</label>
+      <input type="number" class="budget-input" min="0" step="1"
+        data-category="${escapeHtml(category)}" data-owner="${escapeHtml(owner)}"
+        data-orig="${budget}" value="${budget}">
+      <button type="button" class="budget-save-btn" hidden>Save</button>
+      <span class="budget-save-status"></span>
+    </div>`;
 }
 
 function renderRow(item, personFilter) {
@@ -429,6 +604,7 @@ function renderRow(item, personFilter) {
   const expensesHtml = expenses.length
     ? expenses.map(renderExpenseRow).join("")
     : `<p class="no-expenses">No transactions this month.</p>`;
+  const owner = personFilter === null ? "Household" : personFilter;
   return `
     <div class="row">
       <div class="row-top clickable" data-toggle="${listId}">
@@ -437,7 +613,10 @@ function renderRow(item, personFilter) {
       </div>
       <div class="track"><div class="bar ${item.status}" style="width:${pct}%"></div></div>
       <p class="status-label ${item.status}">${statusLabel(item.status)}</p>
-      <div class="expense-list" id="${listId}" hidden>${expensesHtml}</div>
+      <div class="expense-list" id="${listId}" hidden>
+        ${renderBudgetEditor(item.category, owner, item.budget)}
+        ${expensesHtml}
+      </div>
     </div>`;
 }
 
@@ -468,11 +647,134 @@ function downloadPendingEdits() {
   URL.revokeObjectURL(url);
 }
 
+function handleBudgetInputChange(input) {
+  const container = input.closest(".budget-editor");
+  if (!container) return;
+  const saveBtn = container.querySelector(".budget-save-btn");
+  const status = container.querySelector(".budget-save-status");
+  saveBtn.hidden = String(input.value) === String(input.dataset.orig);
+  status.textContent = "";
+  status.classList.remove("error", "success");
+}
+
+async function saveBudgetEdit(btn) {
+  const container = btn.closest(".budget-editor");
+  const input = container.querySelector(".budget-input");
+  const status = container.querySelector(".budget-save-status");
+  const category = input.dataset.category;
+  const owner = input.dataset.owner;
+  const budget = Number(input.value);
+
+  status.textContent = "";
+  status.classList.remove("error", "success");
+
+  if (isNaN(budget) || budget < 0) {
+    status.textContent = "Enter a valid non-negative number.";
+    status.classList.add("error");
+    return;
+  }
+  if (location.protocol === "file:") {
+    status.textContent = STATIC_FILE_MESSAGE;
+    status.classList.add("error");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  try {
+    const body = await apiFetch("/api/categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([{ category, owner, budget }]),
+    });
+    if (body.errors && body.errors.length > 0) throw new Error(body.errors[0].reason);
+
+    input.dataset.orig = String(budget);
+    btn.hidden = true;
+    status.textContent = "Saved";
+    status.classList.add("success");
+    await refreshData();
+  } catch (err) {
+    status.textContent = `Could not save: ${err.message}`;
+    status.classList.add("error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save";
+  }
+}
+
+async function addCategory() {
+  const nameInput = document.getElementById("new-cat-name");
+  const ownerInput = document.getElementById("new-cat-owner");
+  const typeInput = document.getElementById("new-cat-type");
+  const budgetInput = document.getElementById("new-cat-budget");
+  const status = document.getElementById("add-category-status");
+  const btn = document.getElementById("add-category-btn");
+
+  const category = nameInput.value.trim();
+  const owner = ownerInput.value;
+  const type = typeInput.value;
+  const budget = Number(budgetInput.value);
+
+  status.textContent = "";
+  status.classList.remove("error", "success");
+
+  if (!category) {
+    status.textContent = "Enter a category name.";
+    status.classList.add("error");
+    return;
+  }
+  if (isNaN(budget) || budget < 0) {
+    status.textContent = "Enter a valid non-negative budget.";
+    status.classList.add("error");
+    return;
+  }
+  if (location.protocol === "file:") {
+    status.textContent = STATIC_FILE_MESSAGE;
+    status.classList.add("error");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Adding…";
+  try {
+    const body = await apiFetch("/api/categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([{ category, owner, budget, type }]),
+    });
+    if (body.errors && body.errors.length > 0) throw new Error(body.errors[0].reason);
+
+    status.textContent = `Added "${category}".`;
+    status.classList.add("success");
+    nameInput.value = "";
+    budgetInput.value = "0";
+    await refreshData();
+  } catch (err) {
+    status.textContent = `Could not add category: ${err.message}`;
+    status.classList.add("error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Add category";
+  }
+}
+
 function handleAppClick(e) {
   const toggle = e.target.closest(".row-top.clickable");
-  if (!toggle) return;
-  const list = document.getElementById(toggle.dataset.toggle);
-  if (list) list.hidden = !list.hidden;
+  if (toggle) {
+    const list = document.getElementById(toggle.dataset.toggle);
+    if (list) list.hidden = !list.hidden;
+    return;
+  }
+  const saveBudgetBtn = e.target.closest(".budget-save-btn");
+  if (saveBudgetBtn) {
+    saveBudgetEdit(saveBudgetBtn);
+    return;
+  }
+  const addCategoryBtn = e.target.closest("#add-category-btn");
+  if (addCategoryBtn) {
+    addCategory();
+  }
 }
 
 function ensurePendingEdit(dataset) {
@@ -578,7 +880,9 @@ function render(data) {
       ${data.household.map(item => renderRow(item, null)).join("")}
     </div>
     ${renderSplitSection(data)}
+    ${renderIncomeSection(data)}
     <div class="section people-grid">${peopleHtml}</div>
+    ${renderAddCategorySection(data)}
     <div class="metrics">
       <div class="metric">
         <p class="metric-label">Combined income</p>
@@ -601,6 +905,11 @@ function render(data) {
 function handleAppInput(e) {
   if (e.target.id === "split-income-a" || e.target.id === "split-income-b") {
     updateSplitResult(DATA);
+    return;
+  }
+  const budgetInput = e.target.closest(".budget-input");
+  if (budgetInput) {
+    handleBudgetInputChange(budgetInput);
   }
 }
 

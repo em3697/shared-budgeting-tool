@@ -33,6 +33,7 @@ def compute_dashboard_data() -> dict:
     household_actuals: dict[str, float] = {}
     personal_actuals: dict[str, dict[str, float]] = {}
     personal_income: dict[str, float] = {}
+    personal_income_by_category: dict[str, dict[str, float]] = {}
     unmatched_people: dict[str, float] = {}
     matched_month_count = 0
     transactions = []  # expense rows shown in a category section, for the dashboard's expand-to-view-expenses
@@ -102,6 +103,10 @@ def compute_dashboard_data() -> dict:
 
         if cat_type == "Income":
             personal_income[person_key] = personal_income.get(person_key, 0) + amt
+            personal_income_by_category.setdefault(person_key, {})
+            personal_income_by_category[person_key][category] = (
+                personal_income_by_category[person_key].get(category, 0) + amt
+            )
             continue
 
         if shared:
@@ -173,11 +178,27 @@ def compute_dashboard_data() -> dict:
         income = personal_income.get(owner, 0.0)
         grand_income += income
         grand_expenses += section_total
+
+        # Expected income reuses the same Categories-tab budget column, just
+        # on Income-type categories (e.g. "Salary") instead of expense ones —
+        # a "budget" there means "expected amount" rather than "spending
+        # limit". build_category_list already gives the right shape (actual
+        # received vs. expected, plus any income category with real money in
+        # it this month that was never given an expected-amount budget).
+        income_category_names = sorted({
+            k.split("||")[0] for k in cfg.budgets if k.endswith(f"||{owner}")
+            and cfg.type_of(k.split("||")[0]) == "Income"
+        })
+        income_actuals_map = personal_income_by_category.get(owner, {})
+        income_items, expected_income_total = build_category_list(income_category_names, income_actuals_map, owner)
+
         people[owner] = {
             "categories": items,
             "income": income,
             "expenses": section_total,
             "net": income - section_total,
+            "incomeCategories": income_items,
+            "expectedIncome": expected_income_total,
         }
 
     return {

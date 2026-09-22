@@ -66,6 +66,36 @@ def load_categories(mapping_rows: list[list[str]], budget_rows: list[list[str]])
     return cfg
 
 
+# SoFi's own "Primary Category" lumps two very different things under
+# "Transfers": genuine internal account movement (your own money, no person
+# attached) and P2P payments to/from a specific named person (real money,
+# just routed through Venmo/Zelle). Only the former belongs there — a named
+# payment falling back to "Transfers" would silently disappear from the
+# dashboard (Transfers is fully excluded) even though it's real money.
+# These are exact prefixes seen in real generic-transfer descriptions.
+GENERIC_TRANSFER_PREFIXES = [
+    "venmo",
+    "p2p transfer",
+    "transfer from savings",
+    "transfer to savings",
+    "overdraft protection transfer",
+    "overdraft transfer",  # "...from Savings Account XXXXXX" / "...to Spending Account XXXXXX"
+    "internet transfer",   # "Internet transfer to Spending account XXXXXX"
+    "standard transfer",
+    "ally bank",
+    "check",
+    "transfer",
+]
+
+
+def is_generic_transfer_description(description: str) -> bool:
+    """True for SoFi's own generic internal-transfer descriptions (no person
+    attached) — false for anything else, including named-person P2P payments
+    that SoFi also happens to primary-category as "Transfers"."""
+    lower = description.strip().lower()
+    return any(lower.startswith(prefix) for prefix in GENERIC_TRANSFER_PREFIXES)
+
+
 def normalize_person(raw_person: str) -> str | None:
     """Case/whitespace-insensitive match against config.PEOPLE. Returns the
     canonical name, or None if it matches neither (surfaced separately rather

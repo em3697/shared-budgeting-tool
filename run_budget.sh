@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # Usage:
 #   ./run_budget.sh setup              one-time: create the venv, install deps
-#   ./run_budget.sh import <Person>    import latest SoFi export, then rebuild dashboard
-#   ./run_budget.sh build              just rebuild the dashboard (no new import)
-#   ./run_budget.sh apply-edits        apply category changes downloaded from the dashboard, then rebuild
+#   ./run_budget.sh import <Person>    import latest SoFi export, then start the live dashboard server
+#   ./run_budget.sh build              start the live dashboard server (alias for "serve")
+#   ./run_budget.sh apply-edits        apply category changes downloaded from the dashboard, then start the live server
 #   ./run_budget.sh serve              start the local dashboard server (auto-opens browser, live refresh + save)
+#   ./run_budget.sh serve --reload     same, but auto-restarts when a .py/.html file changes
+#                                      (handy during active development; off by default)
+#
+# Every command above hands off to the live server — a static dashboard.html
+# goes stale the moment new data lands, so live refresh + in-page save is
+# the default view everywhere now. Run "python build_dashboard.py" directly
+# if you specifically want a static, shareable snapshot instead.
 #
 # Auto-detects the SoFi export from ~/Downloads (matching the filename SoFi
 # generates) — no need to rename or move the file first. Pass --file to
@@ -46,14 +53,8 @@ case "$ACTION" in
     echo "Importing latest SoFi export for $PERSON..."
     python import_sofi.py --person "$PERSON"
     echo ""
-    echo "Rebuilding dashboard..."
-    python build_dashboard.py
-    ;;
-
-  build)
-    activate_venv
-    echo "Rebuilding dashboard..."
-    python build_dashboard.py
+    echo "Starting local dashboard server..."
+    python server.py
     ;;
 
   apply-edits)
@@ -61,23 +62,24 @@ case "$ACTION" in
     echo "Applying category changes from the dashboard..."
     python apply_category_edits.py
     echo ""
-    echo "Rebuilding dashboard..."
-    python build_dashboard.py
-    ;;
-
-  serve)
-    activate_venv
     echo "Starting local dashboard server..."
     python server.py
+    ;;
+
+  build|serve)
+    activate_venv
+    echo "Starting local dashboard server..."
+    python server.py "${@:2}"
     ;;
 
   *)
     echo "Usage:"
     echo "  ./run_budget.sh setup              one-time: create venv + install deps"
-    echo "  ./run_budget.sh import <Person>     import latest SoFi export + rebuild dashboard"
-    echo "  ./run_budget.sh build               just rebuild the dashboard"
-    echo "  ./run_budget.sh apply-edits         apply dashboard category changes + rebuild"
+    echo "  ./run_budget.sh import <Person>     import latest SoFi export + start the live server"
+    echo "  ./run_budget.sh build               start the local dashboard server (alias for serve)"
+    echo "  ./run_budget.sh apply-edits         apply dashboard category changes + start the live server"
     echo "  ./run_budget.sh serve               start the local dashboard server (auto-opens browser)"
+    echo "  ./run_budget.sh serve --reload      same, but auto-restarts when source files change"
     exit 1
     ;;
 esac
