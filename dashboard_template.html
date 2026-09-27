@@ -102,11 +102,12 @@
   .split-inputs { display: flex; flex-wrap: wrap; gap: 16px; margin: 14px 0 4px; }
   .split-input-group { flex: 1; min-width: 0; }
   .split-input-group label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 4px; }
-  .split-input-group input {
+  .split-input-group input, .split-input-group select {
     width: 100%; font: inherit; font-variant-numeric: tabular-nums;
     padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
     background: var(--paper); color: var(--ink);
   }
+  .split-input-group select { max-width: 200px; }
   .split-result {
     margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);
     font-size: 14px; font-weight: 600; text-align: center; color: var(--ink);
@@ -363,6 +364,8 @@ function renderSplitSection(data) {
   const storedB = Number(localStorage.getItem("splitIncome_" + b));
   const startA = storedA > 0 ? storedA : trackedIncomeA;
   const startB = storedB > 0 ? storedB : trackedIncomeB;
+  const storedMode = localStorage.getItem("splitMode");
+  const startMode = storedMode === "even" ? "even" : "income";
 
   return `
     <div class="section">
@@ -371,6 +374,13 @@ function renderSplitSection(data) {
         <div class="split-row"><span>Total shared spending this month</span><span>${fmt(shared.total)}</span></div>
         <div class="split-row"><span>Paid by ${escapeHtml(a)}</span><span>${fmt(paidA)}</span></div>
         <div class="split-row"><span>Paid by ${escapeHtml(b)}</span><span>${fmt(paidB)}</span></div>
+        <div class="split-input-group">
+          <label for="split-mode">Split ratio</label>
+          <select id="split-mode">
+            <option value="income"${startMode === "income" ? " selected" : ""}>By income</option>
+            <option value="even"${startMode === "even" ? " selected" : ""}>50 / 50</option>
+          </select>
+        </div>
         <div class="split-inputs">
           <div class="split-input-group">
             <label for="split-income-a">${escapeHtml(a)}'s income</label>
@@ -382,12 +392,7 @@ function renderSplitSection(data) {
           </div>
         </div>
         <div class="split-result" id="split-result"></div>
-        <p class="split-note">
-          Includes every transaction below marked "Shared", regardless of category. Costs are
-          split in proportion to the incomes above (e.g. if ${escapeHtml(b)} earns 1.2x
-          ${escapeHtml(a)}, ${escapeHtml(b)} covers 1.2x the share). Defaults to this month's
-          tracked income — edit either number to try a different ratio.
-        </p>
+        <p class="split-note" id="split-note"></p>
       </div>
       <div class="overview-grid">
         <div class="overview-card">
@@ -420,6 +425,7 @@ function updateSplitResult(data) {
   const [a, b] = people;
   const inputA = document.getElementById("split-income-a");
   const inputB = document.getElementById("split-income-b");
+  const modeSelect = document.getElementById("split-mode");
   const result = document.getElementById("split-result");
   if (!inputA || !inputB || !result) return;
 
@@ -428,14 +434,27 @@ function updateSplitResult(data) {
   localStorage.setItem("splitIncome_" + a, String(incomeA));
   localStorage.setItem("splitIncome_" + b, String(incomeB));
 
+  const splitMode = modeSelect ? modeSelect.value : "income";
+  localStorage.setItem("splitMode", splitMode);
+
   const shared = data.sharedExpenses || { total: 0, paidByPerson: {} };
   const paidA = shared.paidByPerson[a] || 0;
   const paidB = shared.paidByPerson[b] || 0;
   const totalIncome = incomeA + incomeB;
-  const shareA = totalIncome > 0 ? incomeA / totalIncome : 0.5;
+  // "Expected income" (below) always reflects whatever's actually typed into
+  // the income boxes — the split ratio is a separate choice, so switching to
+  // 50/50 here doesn't require faking equal income values just to force it.
+  const shareA = splitMode === "even" ? 0.5 : (totalIncome > 0 ? incomeA / totalIncome : 0.5);
   const fairA = shared.total * shareA;
   const fairB = shared.total * (1 - shareA);
   const balanceA = paidA - fairA; // positive: A paid more than their fair share
+
+  const noteEl = document.getElementById("split-note");
+  if (noteEl) {
+    noteEl.textContent = splitMode === "even"
+      ? `Includes every transaction below marked "Shared", regardless of category. Costs are split evenly 50/50, regardless of income.`
+      : `Includes every transaction below marked "Shared", regardless of category. Costs are split in proportion to the incomes below (e.g. if ${b} earns 1.2x ${a}, ${b} covers 1.2x the share). Defaults to this month's tracked income — edit either number to try a different ratio.`;
+  }
 
   result.classList.remove("settled");
   if (Math.abs(balanceA) < 1) {
@@ -849,6 +868,10 @@ function handleSharedToggle(checkbox) {
 }
 
 function handleAppChange(e) {
+  if (e.target.id === "split-mode") {
+    updateSplitResult(DATA);
+    return;
+  }
   const select = e.target.closest(".expense-cat-select");
   if (select) {
     handleCategoryChange(select);
