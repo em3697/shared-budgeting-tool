@@ -1,11 +1,12 @@
 """
-Applies category and Shared-toggle edits made in the dashboard back to the
-Transactions tab.
+Applies category, Shared-toggle, and per-transaction split-percent edits made
+in the dashboard back to the Transactions tab.
 
-The dashboard (dashboard.html) lets you re-categorize a transaction or flip
-whether it's Shared, but it never writes to the Sheet directly — it has no
-credential to do that with. Instead it downloads a small JSON file describing
-the change(s). Run this script afterward to actually apply them.
+The dashboard (dashboard.html) lets you re-categorize a transaction, flip
+whether it's Shared, or override its split ratio, but it never writes to the
+Sheet directly — it has no credential to do that with. Instead it downloads a
+small JSON file describing the change(s). Run this script afterward to
+actually apply them.
 
 Usage:
     python apply_category_edits.py --file ~/Downloads/category-edits_2026-08-17T12-00-00.json
@@ -39,6 +40,7 @@ def apply_edits(sheet, cfg, tx_rows: list[list[str]], edits: list[dict]) -> tupl
     with a "reason" key added, never raised for a row-level mismatch."""
     cell_updates = {}    # category label edits — must stay RAW
     shared_updates = {}  # Shared checkbox edits — written as real booleans via USER_ENTERED
+    split_updates = {}   # per-transaction split-percent overrides — plain text, RAW
     new_categories = {}  # category -> person who first introduced it, for the placeholder row's Owner
     applied = 0
     skipped = []
@@ -50,7 +52,7 @@ def apply_edits(sheet, cfg, tx_rows: list[list[str]], edits: list[dict]) -> tupl
             skipped.append({**edit, "reason": "row no longer exists"})
             continue
 
-        current = tx_rows[idx] + [""] * (9 - len(tx_rows[idx]))
+        current = tx_rows[idx] + [""] * (10 - len(tx_rows[idx]))
         current_description = current[1].strip()
         try:
             current_amount = float(current[2])
@@ -88,6 +90,20 @@ def apply_edits(sheet, cfg, tx_rows: list[list[str]], edits: list[dict]) -> tupl
             shared_updates[f"I{row}"] = "TRUE" if edit["newShared"] else "FALSE"
             changed = True
 
+        if "newSplitPct" in edit:
+            raw_pct = edit["newSplitPct"]
+            if raw_pct is None or raw_pct == "":
+                split_updates[f"J{row}"] = ""
+                changed = True
+            else:
+                try:
+                    pct = float(raw_pct)
+                except (TypeError, ValueError):
+                    pct = None
+                if pct is not None and 0 <= pct <= 100:
+                    split_updates[f"J{row}"] = f"{pct:.2f}"
+                    changed = True
+
         if changed:
             applied += 1
         else:
@@ -97,6 +113,8 @@ def apply_edits(sheet, cfg, tx_rows: list[list[str]], edits: list[dict]) -> tupl
         sheets_client.update_cells(sheet, config.TRANSACTIONS_TAB, cell_updates)
     if shared_updates:
         sheets_client.update_cells(sheet, config.TRANSACTIONS_TAB, shared_updates, value_input_option="USER_ENTERED")
+    if split_updates:
+        sheets_client.update_cells(sheet, config.TRANSACTIONS_TAB, split_updates)
 
     if new_categories:
         category_rows = [[cat, owner, "", "Expense"] for cat, owner in sorted(new_categories.items())]

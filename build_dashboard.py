@@ -42,8 +42,8 @@ def compute_dashboard_data() -> dict:
 
     for i, row in enumerate(tx_rows[1:]):
         sheet_row = i + 2  # tx_rows includes the header at index 0, i.e. sheet row 1
-        row = row + [""] * (9 - len(row))
-        date, description, amount_str, category, person, _, month, _, shared_str = row[:9]
+        row = row + [""] * (10 - len(row))
+        date, description, amount_str, category, person, _, month, _, shared_str, split_pct_str = row[:10]
 
         if month != current_month:
             continue
@@ -101,6 +101,17 @@ def compute_dashboard_data() -> dict:
             shared_total += amt
             shared_paid_by_person[person_key] = shared_paid_by_person.get(person_key, 0) + amt
 
+        # A per-transaction split override (e.g. "Matt ordered twice as much
+        # at this dinner") — a percentage that's config.PEOPLE[0]'s share of
+        # just this one item, applied instead of the default ratio. Blank or
+        # unparsable falls back to the default, same as if never set.
+        split_pct = None
+        if split_pct_str.strip():
+            try:
+                split_pct = float(split_pct_str)
+            except ValueError:
+                split_pct = None
+
         if cat_type == "Income":
             personal_income[person_key] = personal_income.get(person_key, 0) + amt
             personal_income_by_category.setdefault(person_key, {})
@@ -122,7 +133,7 @@ def compute_dashboard_data() -> dict:
             # cell, which is what an edit's identity-match must be checked
             # against in apply_category_edits.py.
             "amount": amt, "rawAmount": raw_amt, "category": category, "person": person_key,
-            "shared": shared,
+            "shared": shared, "splitPct": split_pct,
         })
 
     def build_category_list(categories, actuals_map, owner):

@@ -82,6 +82,13 @@
   .expense-shared { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
   .expense-shared input { cursor: pointer; }
   .expense-shared.edited { color: var(--amber); font-weight: 600; }
+  .expense-split-pct { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+  .expense-split-pct input {
+    width: 44px; font: inherit; font-variant-numeric: tabular-nums; padding: 2px 4px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink);
+  }
+  .expense-split-pct.edited { color: var(--amber); font-weight: 600; }
+  .expense-split-pct.edited input { border-color: var(--amber); background: var(--amber-bg); }
   .expense-cat-select { font-size: 12px; max-width: 150px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); padding: 2px 4px; }
   .expense-cat-select.edited { border-color: var(--amber); background: var(--amber-bg); }
   .no-expenses { margin: 4px 0; font-size: 12px; color: var(--ink-muted); }
@@ -320,6 +327,20 @@ function txForCategory(category, personFilter) {
     t.category === category && (personFilter === null || t.person === personFilter));
 }
 
+function renderSplitPctInput(t) {
+  const personA = (DATA.peopleOrder && DATA.peopleOrder[0]) || "A";
+  const value = t.splitPct != null ? t.splitPct : "";
+  return `
+    <label class="expense-split-pct" title="${escapeHtml(personA)}'s share of just this item — blank uses the default split ratio">
+      <input type="number" class="split-pct-input" min="0" max="100" step="1"
+        data-row="${t.row}" data-date="${escapeHtml(t.date)}"
+        data-description="${escapeHtml(t.description)}" data-amount="${t.rawAmount}"
+        data-person="${escapeHtml(t.person)}" data-orig-pct="${value}"
+        value="${value}" placeholder="default">
+      <span>% ${escapeHtml(personA)}</span>
+    </label>`;
+}
+
 function renderExpenseRow(t) {
   const options = DATA.categories.map(c =>
     `<option value="${escapeHtml(c)}"${c === t.category ? " selected" : ""}>${escapeHtml(c)}</option>`
@@ -340,6 +361,7 @@ function renderExpenseRow(t) {
             ${t.shared ? "checked" : ""}>
           Shared
         </label>
+        ${t.shared ? renderSplitPctInput(t) : ""}
         <select class="expense-cat-select"
           data-row="${t.row}" data-date="${escapeHtml(t.date)}"
           data-description="${escapeHtml(t.description)}" data-amount="${t.rawAmount}"
@@ -447,15 +469,26 @@ function updateSplitResult(data) {
   // the income boxes — the split ratio is a separate choice, so switching to
   // 50/50 here doesn't require faking equal income values just to force it.
   const shareA = splitMode === "even" ? 0.5 : (totalIncome > 0 ? incomeA / totalIncome : 0.5);
-  const fairA = shared.total * shareA;
-  const fairB = shared.total * (1 - shareA);
+
+  // Apply shareA to each shared transaction individually rather than to the
+  // aggregate total, so a per-item override (e.g. "Matt ordered twice as
+  // much at this dinner") only affects that one line — everything else still
+  // falls back to the default ratio above.
+  const sharedTxns = (data.transactions || []).filter(t => t.shared);
+  let fairA = 0;
+  for (const t of sharedTxns) {
+    const txnShareA = (t.splitPct != null) ? (t.splitPct / 100) : shareA;
+    fairA += t.amount * txnShareA;
+  }
+  const fairB = shared.total - fairA;
   const balanceA = paidA - fairA; // positive: A paid more than their fair share
 
   const noteEl = document.getElementById("split-note");
   if (noteEl) {
-    noteEl.textContent = splitMode === "even"
+    const base = splitMode === "even"
       ? `Includes every transaction below marked "Shared", regardless of category. Costs are split evenly 50/50, regardless of income.`
       : `Includes every transaction below marked "Shared", regardless of category. Costs are split in proportion to the incomes below (e.g. if ${b} earns 1.2x ${a}, ${b} covers 1.2x the share). Defaults to this month's tracked income — edit either number to try a different ratio.`;
+    noteEl.textContent = base + ` A shared item can also override this on its own — set a "% ${a}" on that specific transaction below to split just that one differently.`;
   }
 
   result.classList.remove("settled");
@@ -837,7 +870,7 @@ function ensurePendingEdit(dataset) {
 
 function prunePendingEdit(row) {
   const edit = pendingEdits[row];
-  if (edit && !("newCategory" in edit) && !("newShared" in edit)) {
+  if (edit && !("newCategory" in edit) && !("newShared" in edit) && !("newSplitPct" in edit)) {
     delete pendingEdits[row];
   }
 }
@@ -892,6 +925,25 @@ function handleSharedToggle(checkbox) {
   updatePendingBar();
 }
 
+function handleSplitPctChange(input) {
+  const row = Number(input.dataset.row);
+  const origPct = input.dataset.origPct || "";
+  const newPctRaw = input.value.trim();
+  const label = input.closest(".expense-split-pct");
+  const edit = ensurePendingEdit(input.dataset);
+  if (newPctRaw === origPct) {
+    delete edit.newSplitPct;
+    delete edit.oldSplitPct;
+    if (label) label.classList.remove("edited");
+  } else {
+    edit.oldSplitPct = origPct === "" ? null : Number(origPct);
+    edit.newSplitPct = newPctRaw === "" ? null : Number(newPctRaw);
+    if (label) label.classList.add("edited");
+  }
+  prunePendingEdit(row);
+  updatePendingBar();
+}
+
 function handleAppChange(e) {
   if (e.target.id === "split-mode") {
     updateSplitResult(DATA);
@@ -905,6 +957,11 @@ function handleAppChange(e) {
   const checkbox = e.target.closest(".expense-shared-toggle");
   if (checkbox) {
     handleSharedToggle(checkbox);
+    return;
+  }
+  const pctInput = e.target.closest(".split-pct-input");
+  if (pctInput) {
+    handleSplitPctChange(pctInput);
   }
 }
 
