@@ -403,6 +403,7 @@ function renderSplitSection(data) {
           <div class="split-row overview-true-net"><span>True net this month</span><span id="overview-truenet-a"></span></div>
           <div class="split-row overview-section-gap"><span>Expected income</span><span id="overview-expected-income-a"></span></div>
           <div class="split-row"><span>Budgeted expenses</span><span id="overview-budgeted-expenses-a"></span></div>
+          <div class="split-row"><span>Unbudgeted spending</span><span id="overview-unbudgeted-a"></span></div>
           <div class="split-row overview-true-net"><span>Budget surplus / deficit</span><span id="overview-budget-diff-a"></span></div>
         </div>
         <div class="overview-card">
@@ -413,6 +414,7 @@ function renderSplitSection(data) {
           <div class="split-row overview-true-net"><span>True net this month</span><span id="overview-truenet-b"></span></div>
           <div class="split-row overview-section-gap"><span>Expected income</span><span id="overview-expected-income-b"></span></div>
           <div class="split-row"><span>Budgeted expenses</span><span id="overview-budgeted-expenses-b"></span></div>
+          <div class="split-row"><span>Unbudgeted spending</span><span id="overview-unbudgeted-b"></span></div>
           <div class="split-row overview-true-net"><span>Budget surplus / deficit</span><span id="overview-budget-diff-b"></span></div>
         </div>
       </div>
@@ -505,13 +507,30 @@ function updateSplitResult(data) {
   const budgetedExpensesA = personalBudgetA + fairShareBudgetA;
   const budgetedExpensesB = personalBudgetB + fairShareBudgetB;
 
+  // Any category with no budget set (Uncategorized, or anything else never
+  // assigned an amount) contributed $0 here before, even with real spending
+  // in it — silently making the surplus look better than it actually is.
+  // Count that spending too, split the same way as household budget above.
+  const personalUnbudgetedA = sumUnbudgetedActual(data.people[a] && data.people[a].categories);
+  const personalUnbudgetedB = sumUnbudgetedActual(data.people[b] && data.people[b].categories);
+  const householdUnbudgetedTotal = sumUnbudgetedActual(data.household);
+  const unbudgetedShareA = householdUnbudgetedTotal * shareA;
+  const unbudgetedShareB = householdUnbudgetedTotal * (1 - shareA);
+  const unbudgetedA = personalUnbudgetedA + unbudgetedShareA;
+  const unbudgetedB = personalUnbudgetedB + unbudgetedShareB;
+
+  const totalExpensesA = budgetedExpensesA + unbudgetedA;
+  const totalExpensesB = budgetedExpensesB + unbudgetedB;
+
   setText("overview-expected-income-a", fmt(expectedIncomeA));
   setText("overview-budgeted-expenses-a", fmt(budgetedExpensesA));
-  setSignedText("overview-budget-diff-a", expectedIncomeA - budgetedExpensesA);
+  setText("overview-unbudgeted-a", fmt(unbudgetedA));
+  setSignedText("overview-budget-diff-a", expectedIncomeA - totalExpensesA);
 
   setText("overview-expected-income-b", fmt(expectedIncomeB));
   setText("overview-budgeted-expenses-b", fmt(budgetedExpensesB));
-  setSignedText("overview-budget-diff-b", expectedIncomeB - budgetedExpensesB);
+  setText("overview-unbudgeted-b", fmt(unbudgetedB));
+  setSignedText("overview-budget-diff-b", expectedIncomeB - totalExpensesB);
 }
 
 function renderIncomeCategoryRow(item, owner) {
@@ -601,6 +620,12 @@ function setSignedText(id, value) {
 
 function sumBudgets(items) {
   return (items || []).reduce((sum, item) => sum + (item.budget || 0), 0);
+}
+
+function sumUnbudgetedActual(items) {
+  return (items || [])
+    .filter(item => item.status === "unbudgeted")
+    .reduce((sum, item) => sum + (item.actual || 0), 0);
 }
 
 function renderBudgetEditor(category, owner, budget, label) {
