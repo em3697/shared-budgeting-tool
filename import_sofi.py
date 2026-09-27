@@ -176,7 +176,10 @@ def main():
             get_month_label(date_obj),
             "SoFi",
         ])
-        shared_defaults.append("TRUE" if cfg.is_household_category(category) else "FALSE")
+        # No auto-inference here — every new transaction defaults to
+        # unshared and gets marked Shared explicitly (via the dashboard's
+        # checkbox) on a case-by-case basis.
+        shared_defaults.append("FALSE")
         existing_keys.add(key)
 
     if not new_rows:

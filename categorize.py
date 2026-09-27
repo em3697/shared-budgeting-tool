@@ -27,9 +27,6 @@ class CategoryConfig:
     def budget_for(self, category: str, owner: str) -> float:
         return self.budgets.get(f"{category}||{owner}", 0.0)
 
-    def is_household_category(self, category: str) -> bool:
-        return f"{category}||Household" in self.budgets
-
     def type_of(self, category: str) -> str:
         return self.types.get(category, "Expense")
 

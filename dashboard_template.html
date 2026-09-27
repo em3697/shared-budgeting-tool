@@ -886,7 +886,12 @@ function handleAppChange(e) {
 function render(data) {
   document.getElementById("month-label").textContent = data.month;
 
-  const peopleHtml = Object.keys(data.people).map(name => {
+  // Object.keys(data.people) is not stable across server restarts — the
+  // dict is built by iterating a Python set, whose order depends on hash
+  // randomization. peopleOrder is derived from config.PEOPLE, always in the
+  // same fixed order.
+  const peopleNames = data.peopleOrder || Object.keys(data.people);
+  const peopleHtml = peopleNames.map(name => {
     const p = data.people[name];
     return `<div><h2>${name}</h2>${p.categories.map(item => renderRow(item, name)).join("")}</div>`;
   }).join("");

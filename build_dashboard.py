@@ -94,9 +94,9 @@ def compute_dashboard_data() -> dict:
         # personal category with a shared transaction shows up under
         # Household; a normally-household category with an unshared
         # transaction shows up under that person's own section instead.
-        # Existing rows were backfilled from is_household_category; blank
-        # cells (shouldn't normally happen) fall back to the same default.
-        shared = shared_str.strip().upper() == "TRUE" if shared_str.strip() else cfg.is_household_category(category)
+        # No auto-inference from category — a blank cell (shouldn't normally
+        # happen) defaults to unshared, same as a new import.
+        shared = shared_str.strip().upper() == "TRUE"
         if shared:
             shared_total += amt
             shared_paid_by_person[person_key] = shared_paid_by_person.get(person_key, 0) + amt
