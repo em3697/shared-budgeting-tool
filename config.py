@@ -13,10 +13,17 @@ PEOPLE = ["Elise", "Matt"]
 # one). Keep this file OUT of any git repo — it's a credential.
 SERVICE_ACCOUNT_FILE = "service_account.json"
 
-TRANSACTIONS_TAB = "Transactions"  # Date | Description | Amount | Category | Person | Week | Month | Source | Shared | Split %
+TRANSACTIONS_TAB = "Transactions"  # Date | Description | Amount | Category | Person | Week | Month | Source | Shared | Split % | Authorized Date | Pending
 # Split % is config.PEOPLE[0]'s (Elise's) percentage share of that one shared
 # transaction — blank means "use whatever the split-mode/income ratio in the
 # dashboard currently computes," same as every other transaction.
+#
+# Authorized Date + Pending track charges that haven't posted yet, so you can
+# see true spending before a pending charge finalizes. Authorized Date is the
+# stable identity used to match a pending row to its later-posted
+# counterpart (the posted Amount/Date can shift slightly, e.g. a tip added) —
+# import_sofi.py updates that row in place when it posts instead of
+# appending a duplicate.
 CATEGORIES_TAB = "Categories"                # Category | Owner | Monthly Budget | Type
 CATEGORY_MAPPINGS_TAB = "Category Mappings"  # Keyword | Category
 HISTORY_TAB = "History"                      # Month | Owner | Category | Budget | Actual | Remaining | Status

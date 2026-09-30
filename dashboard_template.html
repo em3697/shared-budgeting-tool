@@ -37,8 +37,13 @@
     margin-bottom: 24px;
   }
   h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
-  .header-right { display: flex; align-items: center; gap: 10px; }
-  .month-label { font-size: 13px; color: var(--ink-muted); }
+  .header-right { display: flex; align-items: center; gap: 6px; }
+  .month-label { font-size: 13px; color: var(--ink-muted); min-width: 110px; text-align: center; }
+  .month-nav-btn {
+    font: inherit; font-size: 15px; line-height: 1; color: var(--ink); background: var(--card);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; cursor: pointer;
+  }
+  .month-nav-btn:disabled { cursor: default; opacity: 0.35; }
   h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
   .section { margin-bottom: 28px; }
   .people-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -77,6 +82,10 @@
   .expense-info { display: flex; gap: 10px; flex: 1 1 180px; min-width: 0; color: var(--ink-soft); }
   .expense-date { flex-shrink: 0; color: var(--ink-muted); }
   .expense-desc { flex: 1; white-space: normal; overflow-wrap: anywhere; }
+  .expense-pending {
+    flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em;
+    color: var(--amber); background: var(--amber-bg); border-radius: 4px; padding: 1px 5px;
+  }
   .expense-controls { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .expense-amt { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--ink); }
   .expense-shared { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
@@ -168,7 +177,9 @@
   <header>
     <h1>Our budget</h1>
     <div class="header-right">
+      <button type="button" id="month-prev" class="month-nav-btn" aria-label="Previous month">‹</button>
       <span class="month-label" id="month-label"></span>
+      <button type="button" id="month-next" class="month-nav-btn" aria-label="Next month">›</button>
       <button type="button" id="refresh-btn">Refresh</button>
     </div>
   </header>
@@ -189,6 +200,22 @@
 // still works. When served by server.py, Refresh and Save changes hit its
 // /api/* routes and DATA gets reassigned in place.
 let DATA = __DASHBOARD_DATA__;
+// Which month is currently on screen — separate from DATA.currentMonth (the
+// real calendar month), so paging back to a past month doesn't get undone
+// the next time something calls refreshData() (e.g. after saving an edit).
+let currentViewMonth = DATA.month;
+
+function shiftMonth(monthStr, delta) {
+  const [y, m] = monthStr.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatMonthLabel(monthStr) {
+  const [y, m] = monthStr.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  return d.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
 
 function fmt(n) {
   const v = Math.round(Number(n) || 0);
@@ -258,13 +285,19 @@ async function refreshData() {
   const btn = document.getElementById("refresh-btn");
   if (btn) { btn.disabled = true; btn.textContent = "Refreshing…"; }
   try {
-    DATA = await apiFetch("/api/data");
+    DATA = await apiFetch(`/api/data?month=${encodeURIComponent(currentViewMonth)}`);
+    currentViewMonth = DATA.month;
     render(DATA);
   } catch (err) {
     setStatusMessage(`Could not refresh: ${err.message}`, true);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Refresh"; }
   }
+}
+
+async function loadMonth(monthStr) {
+  currentViewMonth = monthStr;
+  await refreshData();
 }
 
 async function saveChanges() {
@@ -350,6 +383,7 @@ function renderExpenseRow(t) {
       <div class="expense-info">
         <span class="expense-date">${escapeHtml(t.date)}</span>
         <span class="expense-desc" title="${escapeHtml(t.description)}">${escapeHtml(t.description)}</span>
+        ${t.pending ? '<span class="expense-pending" title="Not yet posted — amount may still change">pending</span>' : ""}
       </div>
       <div class="expense-controls">
         <span class="expense-amt">${fmt(t.amount)}</span>
@@ -419,7 +453,7 @@ function renderSplitSection(data) {
       <div class="overview-grid">
         <div class="overview-card">
           <h3>${escapeHtml(a)} — overview</h3>
-          <div class="split-row"><span>Income</span><span id="overview-income-a"></span></div>
+          <div class="split-row"><span>Income (your typed target)</span><span id="overview-income-a"></span></div>
           <div class="split-row"><span>Personal spending</span><span id="overview-personal-a"></span></div>
           <div class="split-row"><span>Fair share of shared costs</span><span id="overview-fairshare-a"></span></div>
           <div class="split-row overview-true-net"><span>True net this month</span><span id="overview-truenet-a"></span></div>
@@ -430,7 +464,7 @@ function renderSplitSection(data) {
         </div>
         <div class="overview-card">
           <h3>${escapeHtml(b)} — overview</h3>
-          <div class="split-row"><span>Income</span><span id="overview-income-b"></span></div>
+          <div class="split-row"><span>Income (your typed target)</span><span id="overview-income-b"></span></div>
           <div class="split-row"><span>Personal spending</span><span id="overview-personal-b"></span></div>
           <div class="split-row"><span>Fair share of shared costs</span><span id="overview-fairshare-b"></span></div>
           <div class="split-row overview-true-net"><span>True net this month</span><span id="overview-truenet-b"></span></div>
@@ -487,8 +521,10 @@ function updateSplitResult(data) {
   if (noteEl) {
     const base = splitMode === "even"
       ? `Includes every transaction below marked "Shared", regardless of category. Costs are split evenly 50/50, regardless of income.`
-      : `Includes every transaction below marked "Shared", regardless of category. Costs are split in proportion to the incomes below (e.g. if ${b} earns 1.2x ${a}, ${b} covers 1.2x the share). Defaults to this month's tracked income — edit either number to try a different ratio.`;
-    noteEl.textContent = base + ` A shared item can also override this on its own — set a "% ${a}" on that specific transaction below to split just that one differently.`;
+      : `Includes every transaction below marked "Shared", regardless of category. Costs are split in proportion to the incomes below (e.g. if ${b} earns 1.2x ${a}, ${b} covers 1.2x the share).`;
+    noteEl.textContent = base + ` These income numbers are also what the overview cards below use directly as your income —` +
+      ` type your real salary rather than relying on detected paycheck transactions, which can land late or get split across months.` +
+      ` A shared item can also override the split ratio on its own — set a "% ${a}" on that specific transaction below to split just that one differently.`;
   }
 
   result.classList.remove("settled");
@@ -501,23 +537,22 @@ function updateSplitResult(data) {
     result.textContent = `${a} owes ${b} ${fmt(-balanceA)}`;
   }
 
-  // Individual overview: actual tracked income (not the ratio inputs above,
-  // which may be a deliberately hypothetical ratio for splitting purposes)
-  // minus personal (non-shared) spending minus this person's fair share of
-  // shared costs at whatever ratio is currently set.
-  const trackedA = (data.people[a] && data.people[a].income) || 0;
-  const trackedB = (data.people[b] && data.people[b].income) || 0;
+  // Individual overview: your typed income target (incomeA/incomeB, the same
+  // numbers in the boxes above — salaried income is known in advance, no
+  // need to wait on detected paycheck transactions that can land late or
+  // get split across months) minus personal (non-shared) spending minus this
+  // person's fair share of shared costs at whatever ratio is currently set.
   const personalA = (data.people[a] && data.people[a].expenses) || 0;
   const personalB = (data.people[b] && data.people[b].expenses) || 0;
-  const trueNetA = trackedA - personalA - fairA;
-  const trueNetB = trackedB - personalB - fairB;
+  const trueNetA = incomeA - personalA - fairA;
+  const trueNetB = incomeB - personalB - fairB;
 
-  setText("overview-income-a", fmt(trackedA));
+  setText("overview-income-a", fmt(incomeA));
   setText("overview-personal-a", fmt(personalA));
   setText("overview-fairshare-a", fmt(fairA));
   setSignedText("overview-truenet-a", trueNetA);
 
-  setText("overview-income-b", fmt(trackedB));
+  setText("overview-income-b", fmt(incomeB));
   setText("overview-personal-b", fmt(personalB));
   setText("overview-fairshare-b", fmt(fairB));
   setSignedText("overview-truenet-b", trueNetB);
@@ -966,7 +1001,9 @@ function handleAppChange(e) {
 }
 
 function render(data) {
-  document.getElementById("month-label").textContent = data.month;
+  document.getElementById("month-label").textContent = formatMonthLabel(data.month);
+  const nextBtn = document.getElementById("month-next");
+  if (nextBtn) nextBtn.disabled = !data.currentMonth || data.month >= data.currentMonth;
 
   // Object.keys(data.people) is not stable across server restarts — the
   // dict is built by iterating a Python set, whose order depends on hash
@@ -1035,6 +1072,14 @@ document.getElementById("save-changes-btn").addEventListener("click", saveChange
 document.getElementById("refresh-btn").addEventListener("click", () => {
   setStatusMessage("");
   refreshData();
+});
+document.getElementById("month-prev").addEventListener("click", () => {
+  setStatusMessage("");
+  loadMonth(shiftMonth(currentViewMonth, -1));
+});
+document.getElementById("month-next").addEventListener("click", () => {
+  setStatusMessage("");
+  loadMonth(shiftMonth(currentViewMonth, 1));
 });
 </script>
 </body>

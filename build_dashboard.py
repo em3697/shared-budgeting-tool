@@ -20,7 +20,10 @@ OUTPUT_FILE = Path(__file__).parent / "dashboard.html"
 TEMPLATE_FILE = Path(__file__).parent / "dashboard_template.html"
 
 
-def compute_dashboard_data() -> dict:
+def compute_dashboard_data(month: str | None = None) -> dict:
+    """Computes budget-vs-actual for the given "YYYY-MM" month, or the real
+    current month if omitted — this is what lets the dashboard page back to
+    a past month instead of always showing today's."""
     sheet = sheets_client.get_spreadsheet()
 
     mapping_rows = sheets_client.read_all_rows(sheet, config.CATEGORY_MAPPINGS_TAB)
@@ -28,7 +31,8 @@ def compute_dashboard_data() -> dict:
     cfg = load_categories(mapping_rows, budget_rows)
 
     tx_rows = sheets_client.read_all_rows(sheet, config.TRANSACTIONS_TAB)
-    current_month = datetime.now().strftime("%Y-%m")
+    actual_current_month = datetime.now().strftime("%Y-%m")
+    current_month = month or actual_current_month
 
     household_actuals: dict[str, float] = {}
     personal_actuals: dict[str, dict[str, float]] = {}
@@ -42,8 +46,9 @@ def compute_dashboard_data() -> dict:
 
     for i, row in enumerate(tx_rows[1:]):
         sheet_row = i + 2  # tx_rows includes the header at index 0, i.e. sheet row 1
-        row = row + [""] * (10 - len(row))
-        date, description, amount_str, category, person, _, month, _, shared_str, split_pct_str = row[:10]
+        row = row + [""] * (12 - len(row))
+        (date, description, amount_str, category, person, _, month, _,
+         shared_str, split_pct_str, _, pending_str) = row[:12]
 
         if month != current_month:
             continue
@@ -134,6 +139,7 @@ def compute_dashboard_data() -> dict:
             # against in apply_category_edits.py.
             "amount": amt, "rawAmount": raw_amt, "category": category, "person": person_key,
             "shared": shared, "splitPct": split_pct,
+            "pending": pending_str.strip().upper() == "TRUE",
         })
 
     def build_category_list(categories, actuals_map, owner):
@@ -214,6 +220,7 @@ def compute_dashboard_data() -> dict:
 
     return {
         "month": current_month,
+        "currentMonth": actual_current_month,
         "household": household_list,
         "people": people,
         "combined": {

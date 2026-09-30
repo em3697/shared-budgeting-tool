@@ -65,7 +65,7 @@ def index():
     if not TEMPLATE_FILE.exists():
         return "dashboard_template.html not found", 500
     try:
-        data = compute_dashboard_data()
+        data = compute_dashboard_data(month=request.args.get("month"))
     except Exception as e:
         return f"Could not load data from the Sheet: {e}", 502
     _snapshot_best_effort(data)
@@ -79,7 +79,7 @@ def index():
 @app.route("/api/data")
 def api_data():
     try:
-        data = compute_dashboard_data()
+        data = compute_dashboard_data(month=request.args.get("month"))
     except Exception as e:
         return jsonify({"error": f"Could not load data from the Sheet: {e}"}), 502
     _snapshot_best_effort(data)
