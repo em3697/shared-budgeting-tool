@@ -12,11 +12,13 @@ the Transactions tab, and appends only the new rows.
 Both posted AND pending transactions are imported, so you can see true
 month-to-date spending before a pending charge finalizes (e.g. before paying
 a credit card bill at month-end). A pending charge is matched to its later
-posted counterpart by its stable Authorized Date (not by amount/date, which
-can shift slightly once posted — a tip added, a weekend delay) and updated
-in place rather than appended as a second row. Category/Shared/Split % are
-left untouched on reconciliation, so a manual edit made while it was pending
-survives.
+posted counterpart by person + Authorized Date (within MATCH_WINDOW_DAYS,
+since SoFi can shift the date itself by a day or so once a charge clears)
+plus an exact amount match or a matching description — neither amount nor
+description alone is reliable (a tip can be added; "AMAZON MKTPLACE PMTS"
+posts as plain "Amazon") — and updated in place rather than appended as a
+second row. Category/Shared/Split % are left untouched on reconciliation, so
+a manual edit made while it was pending survives.
 """
 
 import argparse
@@ -34,6 +36,15 @@ from categorize import is_generic_transfer_description, load_categories
 #   1786904674519_SoFi-Relay-All-Transactions_2026-08-16.csv
 # (a numeric ID, then this fixed label, then the export date)
 SOFI_FILENAME_PATTERN = "SoFi-Relay-All-Transactions_*.csv"
+
+# Authorized Date isn't perfectly stable across the pending -> posted
+# transition — SoFi has been seen to shift it by a day once a charge clears
+# (e.g. a late hold attributed to the next day once settled). An exact-date
+# match missed those, leaving the old pending row stuck forever alongside a
+# freshly-appended posted duplicate. This window absorbs that drift while
+# still keeping candidates to charges from around the same time, so it can't
+# accidentally merge two unrelated charges days apart.
+MATCH_WINDOW_DAYS = 3
 
 
 def find_latest_export(downloads_dir: Path) -> Path | None:
@@ -114,14 +125,19 @@ def main():
     tx_rows = sheets_client.read_all_rows(sheet, config.TRANSACTIONS_TAB)
 
     posted_keys = set()  # (date_iso, description, amount) — already-finalized transactions
-    # (auth_date_iso, description_lower, person) -> [(sheet row number, pending amount), ...] —
+    # person -> [(sheet row number, auth date, pending amount, description_lower), ...] —
     # rows still marked Pending, so a later "posted" line can be matched back
-    # to the same charge and update it in place. Amount isn't part of the key
-    # itself (a pending estimate can drift before it posts), but is kept
-    # alongside each candidate so multiple distinct charges sharing the same
-    # date+description (e.g. two "Standard transfer" charges the same day)
-    # can be told apart by picking whichever amount is closest.
-    pending_index: dict[tuple, list[tuple[int, float]]] = {}
+    # to the same charge and update it in place. Description is NOT part of
+    # the match condition (see the acceptable-candidate check below) — SoFi
+    # has been seen to report a cleaned-up merchant name once a charge posts
+    # (e.g. pending "AMAZON MKTPLACE PMTS" / "Amazon.com" -> posted "Amazon"),
+    # so requiring it to match exactly missed real reconciliations. The auth
+    # date isn't required to match exactly either (see MATCH_WINDOW_DAYS).
+    # What anchors the match instead is the amount: within the date window,
+    # an exact amount match (or, failing that, a matching description) is
+    # what identifies "this is the same charge" rather than a coincidentally
+    # nearby unrelated one.
+    pending_index: dict[str, list[tuple[int, pd.Timestamp, float, str]]] = {}
 
     for i, row in enumerate(tx_rows[1:], start=2):
         row = row + [""] * (12 - len(row))
@@ -129,12 +145,13 @@ def main():
 
         if row_pending.strip().upper() == "TRUE":
             try:
-                auth_iso = pd.to_datetime(row_auth_date).strftime("%Y-%m-%d")
+                auth_dt = pd.to_datetime(row_auth_date)
                 row_amount = float(row_amount_str)
             except (ValueError, TypeError):
                 continue
-            key = (auth_iso, row_desc.strip().lower(), row_person.strip())
-            pending_index.setdefault(key, []).append((i, row_amount))
+            pending_index.setdefault(row_person.strip(), []).append(
+                (i, auth_dt, row_amount, row_desc.strip().lower())
+            )
         else:
             try:
                 # Column A comes back as whatever Sheets displays it as (e.g.
@@ -195,7 +212,7 @@ def main():
             continue
 
         date_iso = date_obj.strftime("%Y-%m-%d")
-        identity_key = (auth_iso, description.strip().lower(), args.person)
+        description_lower = description.strip().lower()
 
         if status == "posted":
             dedup_key = make_dedup_key(date_iso, description, amount)
@@ -203,17 +220,27 @@ def main():
                 skipped_duplicate += 1
                 continue
 
-            candidates = pending_index.get(identity_key)
-            if candidates:
+            candidates = pending_index.get(args.person, [])
+            # "Same charge" requires the auth date to be close AND (an exact
+            # amount match OR a matching description) — either signal alone
+            # can drift (see the comment on pending_index above), but both
+            # drifting at once alongside a coincidentally nearby auth date
+            # would be a false match, so at least one has to hold exactly.
+            acceptable = [
+                idx for idx, c in enumerate(candidates)
+                if abs((c[1] - auth_obj).days) <= MATCH_WINDOW_DAYS
+                and (abs(c[2] - amount) < 0.01 or c[3] == description_lower)
+            ]
+            if acceptable:
                 # This charge was previously imported while pending — update
                 # that row in place with the now-final date/amount instead of
                 # appending a second row. Category/Shared/Split % are left
                 # alone so any manual edit made while it was pending sticks.
-                # Pick whichever candidate's pending amount is closest to the
-                # posted amount, in case more than one pending charge shares
-                # this exact date + description.
-                best_idx = min(range(len(candidates)), key=lambda idx: abs(candidates[idx][1] - amount))
-                row_num, _ = candidates.pop(best_idx)
+                # Pick whichever acceptable candidate's pending amount is
+                # closest to the posted amount, in case more than one pending
+                # charge for this person falls in the window.
+                best_idx = min(acceptable, key=lambda idx: abs(candidates[idx][2] - amount))
+                row_num, _, _, _ = candidates.pop(best_idx)
                 reconciled_updates[row_num] = {
                     "date_iso": date_iso, "amount": amount,
                     "week": get_week_label(date_obj), "month": get_month_label(date_obj),
@@ -222,13 +249,15 @@ def main():
                 continue
             # else: a brand new posted transaction, never seen as pending — falls through to append below
         else:  # pending
-            # Amount IS part of this check (unlike identity_key/pending_index
-            # above) — two distinct pending charges can share a date and
-            # description (e.g. two "Standard transfer" charges the same
-            # day), and only an exact amount match means "this is the literal
-            # same CSV row as something already tracked."
-            batch_key = (identity_key, amount)
-            already_pending = any(a == amount for _, a in pending_index.get(identity_key, []))
+            # Same "close date + (exact amount or matching description)" test
+            # as above — this is "is the literal same charge already tracked
+            # as pending from a previous import," not a fuzzy guess.
+            batch_key = (description_lower, args.person, amount)
+            already_pending = any(
+                abs((auth_dt - auth_obj).days) <= MATCH_WINDOW_DAYS
+                and (abs(a - amount) < 0.01 or desc == description_lower)
+                for _, auth_dt, a, desc in pending_index.get(args.person, [])
+            )
             if already_pending or batch_key in seen_pending_this_batch:
                 # Already tracked as pending from a previous import (or a
                 # repeated line within this same CSV) — don't re-add it every

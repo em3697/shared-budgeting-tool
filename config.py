@@ -19,11 +19,13 @@ TRANSACTIONS_TAB = "Transactions"  # Date | Description | Amount | Category | Pe
 # dashboard currently computes," same as every other transaction.
 #
 # Authorized Date + Pending track charges that haven't posted yet, so you can
-# see true spending before a pending charge finalizes. Authorized Date is the
-# stable identity used to match a pending row to its later-posted
-# counterpart (the posted Amount/Date can shift slightly, e.g. a tip added) —
-# import_sofi.py updates that row in place when it posts instead of
-# appending a duplicate.
+# see true spending before a pending charge finalizes. Authorized Date (within
+# a few days of drift — see MATCH_WINDOW_DAYS in import_sofi.py) plus an exact
+# amount match or a matching description is used to match a pending row to its
+# later-posted counterpart, since any single one of those three can drift
+# slightly once a charge clears (a tip added, the Authorized Date re-stamped,
+# a cleaned-up merchant name) — import_sofi.py updates that row in place when
+# it posts instead of appending a duplicate.
 CATEGORIES_TAB = "Categories"                # Category | Owner | Monthly Budget | Type
 CATEGORY_MAPPINGS_TAB = "Category Mappings"  # Keyword | Category
 HISTORY_TAB = "History"                      # Month | Owner | Category | Budget | Actual | Remaining | Status
