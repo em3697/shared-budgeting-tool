@@ -167,7 +167,7 @@ def main():
     shared_defaults = []
     auth_date_defaults = []
     pending_defaults = []
-    reconciled_updates = {}  # sheet row number -> {"date_iso", "amount", "week", "month"}
+    reconciled_updates = {}  # sheet row number -> {"date_iso", "amount", "description", "week", "month"}
     seen_pending_this_batch = set()  # guards against a duplicate pending line within the same CSV
     skipped_duplicate = 0
     new_categories = []
@@ -233,16 +233,23 @@ def main():
             ]
             if acceptable:
                 # This charge was previously imported while pending — update
-                # that row in place with the now-final date/amount instead of
-                # appending a second row. Category/Shared/Split % are left
-                # alone so any manual edit made while it was pending sticks.
-                # Pick whichever acceptable candidate's pending amount is
-                # closest to the posted amount, in case more than one pending
-                # charge for this person falls in the window.
+                # that row in place with the now-final date/amount/description
+                # instead of appending a second row. The description IS
+                # overwritten here (unlike Category/Shared/Split %, which are
+                # left alone so a manual edit made while it was pending
+                # sticks) — the posted CSV's cleaned-up merchant name is what
+                # every future re-import's plain description-match dedup
+                # (posted_keys, built from the sheet at the top of this
+                # script) will compare against, so leaving the stale pending-
+                # era text in place would make this same row re-duplicate on
+                # every subsequent import. Pick whichever acceptable
+                # candidate's pending amount is closest to the posted amount,
+                # in case more than one pending charge for this person falls
+                # in the window.
                 best_idx = min(acceptable, key=lambda idx: abs(candidates[idx][2] - amount))
                 row_num, _, _, _ = candidates.pop(best_idx)
                 reconciled_updates[row_num] = {
-                    "date_iso": date_iso, "amount": amount,
+                    "date_iso": date_iso, "amount": amount, "description": description,
                     "week": get_week_label(date_obj), "month": get_month_label(date_obj),
                 }
                 posted_keys.add(dedup_key)
@@ -308,6 +315,7 @@ def main():
         date_cell_updates = {}
         for row_num, vals in reconciled_updates.items():
             date_cell_updates[f"A{row_num}"] = vals["date_iso"]
+            raw_cell_updates[f"B{row_num}"] = vals["description"]
             raw_cell_updates[f"C{row_num}"] = f"{vals['amount']:.2f}"
             raw_cell_updates[f"F{row_num}"] = vals["week"]
             raw_cell_updates[f"G{row_num}"] = vals["month"]
